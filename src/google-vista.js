@@ -131,7 +131,7 @@ bool g3dSome(vec4 c) {
   // camera -> tower at that point blocks the view. c.w = 1 + roof height of the building (cena3d montaMapaPredios)
   float hLinha = mix(uCamB5.y, uAlvoB5.y, t), hTopo = c.w - 1.0;
   bool entre = t > 0.05 && t < 0.93 && d < c.z * 0.8 + 6.0 && length(c.xy - b) > 20.0 && hTopo > hLinha - 4.0;
-  bool naCamera = length(c.xy - a) < c.z * 0.8 + 2.0;
+  bool naCamera = length(c.xy - a) < c.z * 0.8 + 2.0 && uCamB5.y < hTopo + 8.0; // 08/10: only when the camera is at the building's height, not flying over its roof (houses below an aerial camera vanished)
   return entre || naCamera;
 }
 bool g3dFantasma(vec3 p) {

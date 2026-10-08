@@ -56,6 +56,20 @@ vec3 decod(vec3 v, float kn, float kn2, float yb, float ym, float gL){
 }
 uniform vec3 wb;
 uniform float expo;
+// 08/10 deband (Victor: rings / patches on smooth walls in daylight): the daylight layers (sky, sun) are 8-bit lossy webp with
+// no dither and no float source left. Where 4 samples around a texel (random angle, ~dbR texels) all sit within dbT codes of
+// it, the area is smooth: use their mean (+ sub-code grain) so the 8-bit steps dissolve; real edges stay untouched.
+uniform float dbR;
+uniform float dbT;
+float hDb(vec2 p){ p = fract(p * vec2(443.897, 441.423)); p += dot(p, p.yx + 19.19); return fract((p.x + p.y) * p.x); }
+vec3 deband(sampler2D tx, vec2 uv, vec3 c){
+  float a = hDb(uv * 4096.0) * 6.2831853, r = dbR * (0.5 + 0.5 * hDb(uv * 2048.0 + 7.1));
+  vec2 o = vec2(cos(a), sin(a)) * r, p = vec2(-o.y, o.x);
+  vec3 s1 = texture2D(tx, uv + o).rgb, s2 = texture2D(tx, uv - o).rgb, s3 = texture2D(tx, uv + p).rgb, s4 = texture2D(tx, uv - p).rgb;
+  vec3 d = max(max(abs(s1 - c), abs(s2 - c)), max(abs(s3 - c), abs(s4 - c)));
+  vec3 m = (c + s1 + s2 + s3 + s4) * 0.2 + (hDb(uv * 3071.0 + 3.3) - 0.5) / 255.0;
+  return mix(m, c, step(dbT, max(d.r, max(d.g, d.b))));
+}
 // 08/10 local adaptation (Victor: noon highlights blown at the entrance; room too dark seen from the balcony door): a blurred
 // log-luminance map of this panorama (tLoc: r = log2 lum, g = room coverage) pulls each area toward the panorama's mean
 // key (lG), by sLoc stops per stop, at most +-1.5 stops; the window keeps its own exposure. modoLum = write that map.
@@ -126,7 +140,7 @@ vec3 neutral(vec3 c){
 }
 void main(){
   vec3 s = vec3(0.0);
-  ${[0, 1, 2, 3, 4, 5, 6].map((i) => `if (g[${i}].r + g[${i}].g + g[${i}].b > 0.0) s += g[${i}] * esc[${i}] * decod(texture2D(t[${i}], vUv).rgb, joelho[${i}], joelho2[${i}], y2[${i}], ymax[${i}], gamaL[${i}]);`).join('\n  ')}
+  ${[0, 1, 2, 3, 4, 5, 6].map((i) => `if (g[${i}].r + g[${i}].g + g[${i}].b > 0.0) { vec3 c${i} = texture2D(t[${i}], vUv).rgb; if (joelho[${i}] <= 0.0 && dbT > 0.0) c${i} = deband(t[${i}], vUv, c${i}); s += g[${i}] * esc[${i}] * decod(c${i}, joelho[${i}], joelho2[${i}], y2[${i}], ymax[${i}], gamaL[${i}]); }`).join('\n  ')}
   if (usaVis > 0.5) {
     vec3 alb = pow(texture2D(tAlb, vUv).rgb, vec3(2.2));
     vec3 n = normalize(texture2D(tNor, vUv).rgb * 2.0 - 1.0);
@@ -134,9 +148,9 @@ void main(){
   }
   vec3 x = s * wb * expo;
   float fo = usaFora > 0.5 ? texture2D(tFora, vUv).r : 0.0;
-  if (modoLum > 0.5) { float l0 = max(dot(x, vec3(0.2126, 0.7152, 0.0722)), 1e-6); gl_FragColor = vec4(clamp((log2(l0) + 16.0) / 20.0, 0.0, 1.0), 1.0 - fo, 0.0, 1.0); return; }
+  if (modoLum > 0.5) { float l0 = max(dot(x, vec3(0.2126, 0.7152, 0.0722)), 1e-6); float v = clamp((log2(l0) + 16.0) / 20.0, 0.0, 1.0) * 255.0; gl_FragColor = vec4(floor(v) / 255.0, 1.0 - fo, fract(v), 1.0); return; } // 08/10: 16 bits (R hi + B lo) - 8 bits made rings on smooth walls
   if (usaFora > 0.5) x *= mix(1.0, fatorFora, fo); // v4: window exposed on its own
-  if (sLoc > 0.0) { vec4 q = texture2D(tLoc, vUv); float r = exp2(clamp((lG - (q.r * 20.0 - 16.0)) * sLoc, -1.5, 1.5)); x *= mix(1.0, r, smoothstep(0.05, 0.3, q.g) * (1.0 - fo)); }
+  if (sLoc > 0.0) { vec4 q = texture2D(tLoc, vUv); float r = exp2(clamp((lG - ((q.r + q.b / 255.0) * 20.0 - 16.0)) * sLoc, -1.5, 1.5)); x *= mix(1.0, r, smoothstep(0.05, 0.3, q.g) * (1.0 - fo)); }
   float l = dot(x, vec3(0.2126, 0.7152, 0.0722));
   x *= (1.0 + 1.0 / ombro) / (1.0 + l / ombro);   // soft highlight roll-off; 08/10 Victor: white bed blown in daylight -> stronger shoulder (1.1)
   vec3 o = neutral(x);
@@ -219,7 +233,7 @@ export class MisturaPonto {
       vertexShader: VERT, fragmentShader: FRAG, depthTest: false, depthWrite: false,
       uniforms: { t: { value: Array(7).fill(PRETO) }, g: { value: Array.from({ length: 7 }, () => new THREE.Vector3()) },
         esc: { value: Array(7).fill(1) }, gama: { value: 2.2 }, ombro: { value: +(new URLSearchParams(location.search).get('ombro')) || 1.1 }, joelho: { value: Array(7).fill(0) }, joelho2: { value: Array(7).fill(0.95) }, gamaL: { value: Array(7).fill(2.2) }, y2: { value: Array(7).fill(2) }, ymax: { value: Array(7).fill(4) }, wb: { value: new THREE.Vector3(1, 1, 1) }, expo: { value: 1 }, srgb: { value: half ? 0 : 1 },
-        tFora: { value: PRETO }, usaFora: { value: 0 }, fatorFora: { value: 1 }, modoLum: { value: 0 }, tLoc: { value: PRETO }, sLoc: { value: 0 }, lG: { value: 0 },
+        tFora: { value: PRETO }, usaFora: { value: 0 }, fatorFora: { value: 1 }, modoLum: { value: 0 }, tLoc: { value: PRETO }, sLoc: { value: 0 }, lG: { value: 0 }, dbR: { value: 14 / w }, dbT: { value: (new URLSearchParams(location.search).get('deband') === '0' ? 0 : 3) / 255 },
         tAlb: { value: PRETO }, tNor: { value: PRETO }, tVis: { value: PRETO }, tVis2: { value: PRETO }, nInt: { value: 0 }, usaVis: { value: 0 }, gDir: { value: new THREE.Vector3() },
         solDir: { value: new THREE.Vector3(0, 0, 1) }, meioMin: { value: 0 }, visTam: { value: new THREE.Vector2(1, 1) }, raioVis: { value: Number.isFinite(parseFloat(new URLSearchParams(location.search).get('visr'))) ? parseFloat(new URLSearchParams(location.search).get('visr')) : (capacidade().nivel === 'topo' ? 2 : 1) }, pesoN: { value: new URLSearchParams(location.search).get('visn') === '0' ? 0 : 1 } }, // ?visr=0 = old look, ?visn=0 = no normal weight (tests)
     });
@@ -237,9 +251,10 @@ void main(){
   for (int j = -4; j <= 4; j++) for (int i = -4; i <= 4; i++) {
     float k = exp(-float(i * i + j * j) / 8.0);
     vec4 c = texture2D(tL, vUv + vec2(float(i) * 0.0139, float(j) * 0.0278));
-    s += (c.r * 20.0 - 16.0) * c.g * k; w += c.g * k; wt += k;
+    s += ((c.r + c.b / 255.0) * 20.0 - 16.0) * c.g * k; w += c.g * k; wt += k;
   }
-  gl_FragColor = vec4(w > 1e-3 ? (s / w + 16.0) / 20.0 : 0.5, w / wt, 0.0, 1.0);
+  float v = clamp(w > 1e-3 ? (s / w + 16.0) / 20.0 : 0.5, 0.0, 1.0) * 255.0;
+  gl_FragColor = vec4(floor(v) / 255.0, w / wt, fract(v), 1.0);
 }` });
     this.cenaBorra = new THREE.Scene(); this.cenaBorra.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.matBorra));
   }
@@ -387,7 +402,7 @@ void main(){
       this.r.setRenderTarget(this.rtLoc); this.r.render(this.cenaBorra, this.cam);
       this.r.readRenderTargetPixels(this.rtLoc, 0, 0, 64, 32, this.bufLoc);
       let sl = 0, sw = 0; // panorama key = coverage- and solid-angle-weighted mean of log2 lum
-      for (let j = 0; j < 32; j++) { const ca = Math.cos(((j + 0.5) / 32 - 0.5) * Math.PI); for (let i = 0; i < 64; i++) { const k = (j * 64 + i) * 4, w = (this.bufLoc[k + 1] / 255) * ca; sl += ((this.bufLoc[k] / 255) * 20 - 16) * w; sw += w; } }
+      for (let j = 0; j < 32; j++) { const ca = Math.cos(((j + 0.5) / 32 - 0.5) * Math.PI); for (let i = 0; i < 64; i++) { const k = (j * 64 + i) * 4, w = (this.bufLoc[k + 1] / 255) * ca; sl += (((this.bufLoc[k] + this.bufLoc[k + 2] / 255) / 255) * 20 - 16) * w; sw += w; } }
       U.lG.value = sw > 0 ? sl / sw : 0; U.tLoc.value = this.rtLoc.texture; U.sLoc.value = sDia * (0.4 + 0.6 * kDia);
       // day key on the GEOMETRIC mean (08/10): the arithmetic mean was ruled by small sun patches (porta-varanda 15h exposed
       // 20x lower than the entrance, the room behind went black). Points Victor approved sit at log2 -4.0..-4.8: pull each
