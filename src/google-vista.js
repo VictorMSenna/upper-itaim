@@ -596,6 +596,8 @@ uniform float usaVidro;
 uniform float espelho;
 uniform float forcaV;
 uniform float kDiaV;
+uniform sampler2D tPano;
+uniform float panoSrgb;
 // photo cube lookup: scene-frame direction (x mirrored like the sphere) -> local frame of the shot -> face texture
 bool cubo(vec3 d, out vec4 g){
   float f = -d.x, r = -d.z;
@@ -637,10 +639,14 @@ void main(){
       if (usaCubo > 0.5) ok = cubo(vec3(-d.x, d.y, d.z), g);
       else if (espelho > 0.5) g = texture2D(tG, vec2(res.x - gl_FragCoord.x, gl_FragCoord.y) / res);
       else ok = false;
+      vec2 uvR = vec2(fract(0.5 - vUv.x), vUv.y); // the mirrored direction (forward flips) in the panorama's own uv
+      float mR = texture2D(tM, uvR).r;
+      vec3 pR = texture2D(tPano, uvR).rgb; if (panoSrgb > 0.5) pR = pow(pR, vec3(2.2));
+      if (!ok) { g = vec4(0.0); ok = true; mR = 0.0; } // no picture of the city here yet: the balcony still reflects
       if (ok) {
         float w = v.r * (0.25 + 0.75 * v.g) * forcaV * forca;
         // day: covers the reflection of our render's city baked in the pano; night: adds the lit city on the dark glass
-        rgb += paraSrgb(mix(ceu, g.rgb * ganho, g.a)) * w; a += w * kDiaV;
+        rgb += paraSrgb(mix(pR, mix(ceu, g.rgb * ganho, g.a), mR)) * w; a += w * kDiaV; // 08/10 Victor: the floor of the balcony blocks the city in the reflection
       }
     }
   }
@@ -653,7 +659,7 @@ export function materialSobreposicao() {
     blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneMinusSrcAlphaFactor,
     uniforms: { tG: { value: null }, tM: { value: null }, res: { value: new THREE.Vector2(1, 1) }, ganho: { value: new THREE.Vector3(1, 1, 1) }, forca: { value: 1 }, fA0: { value: null }, fA1: { value: null }, fA2: { value: null }, fA3: { value: null }, fW0: { value: null }, fW1: { value: null }, fW2: { value: null }, fW3: { value: null },
       fM: { value: [new THREE.Matrix4(), new THREE.Matrix4(), new THREE.Matrix4(), new THREE.Matrix4()] }, nF: { value: 0 }, nOk: { value: 0 }, luzBase: { value: new THREE.Vector3(1, 1, 1) }, luzesN: { value: 0 }, usaCubo: { value: 0 }, rumoB: { value: 0 },
-      tV: { value: null }, usaVidro: { value: 0 }, espelho: { value: 0 }, forcaV: { value: forcaV }, kDiaV: { value: 1 },
+      tV: { value: null }, usaVidro: { value: 0 }, tPano: { value: null }, panoSrgb: { value: 0 }, espelho: { value: 0 }, forcaV: { value: forcaV }, kDiaV: { value: 1 },
       ceuTopo: { value: new THREE.Vector3(0.12, 0.27, 0.6) }, ceuHoriz: { value: new THREE.Vector3(0.55, 0.66, 0.8) } },
   });
 }

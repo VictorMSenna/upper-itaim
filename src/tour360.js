@@ -46,6 +46,12 @@ async function criar({ container, manifesto = 'assets/render/tour360/manifesto.j
     <div class="t360-nome"></div>
     <div class="t360-luzes">${LUZES.filter((k) => man.pontos.some((p) => p.camadas && p.camadas[k])).map((k) => `<button data-luz="${k}" aria-pressed="false" title="${NOMES_LUZ[k]}"><span class="l-longo">${NOMES_LUZ[k]}</span><span class="l-curto">${CURTO_LUZ[k]}</span></button>`).join('')}</div>
     <button class="t360-fechar" aria-label="Fechar">×</button>`;
+  // 08/10 Victor: the city reflected in the balcony glass is nice but sometimes in the way -> on/off, only where there is glass
+  const bR = document.createElement('button'); bR.className = 't360-reflexo'; bR.hidden = true; bR.setAttribute('aria-pressed', 'true');
+  bR.innerHTML = '<span class="l-longo">Reflexo no vidro</span><span class="l-curto">Reflexo</span>';
+  raiz.querySelector('.t360-luzes').appendChild(bR);
+  bR.addEventListener('click', () => { estado.reflexo = estado.reflexo === false; bR.setAttribute('aria-pressed', String(estado.reflexo)); if (G && G.vidro) { G.malha.material.uniforms.usaVidro.value = estado.reflexo ? 1 : 0; G.vista.acordar(); } desenha(); });
+  function botaoReflexo() { bR.hidden = !(G && G.vidro); bR.setAttribute('aria-pressed', String(estado.reflexo !== false)); }
   container.appendChild(raiz);
   { const b = raiz.querySelector('.t360-rot'); let tm = 0; b.addEventListener('click', (ev) => { ev.stopPropagation(); const ab = !b.classList.contains('aberto'); b.classList.toggle('aberto', ab); b.setAttribute('aria-expanded', String(ab)); clearTimeout(tm); if (ab) tm = setTimeout(() => { b.classList.remove('aberto'); b.setAttribute('aria-expanded', 'false'); }, 6000); }); }
   if (!document.getElementById('t360-css')) {
@@ -296,6 +302,7 @@ async function criar({ container, manifesto = 'assets/render/tour360/manifesto.j
           vista.ref = { ...g, ajuste: window.__g3dAjuste || g.ajuste }; vista.unidadeChave = andar != null && final != null ? `${andar}-${final}` : null;
           vista.ligaNaCena();
           mat.uniforms.tM.value = e.mix.mat.uniforms.tFora.value;
+          mat.uniforms.tPano.value = e.m.material.map; mat.uniforms.panoSrgb.value = e.mix.mat.uniforms.srgb.value;
           vista.definirMascara(mat.uniforms.tM.value && mat.uniforms.tM.value.image);
           const el = e.mix.ultimo && e.mix.ultimo.sol ? e.mix.ultimo.sol.el : 20;
           // the time-of-day grade + night windows live in the tile shaders (shared with the outside view); here only the
@@ -304,11 +311,11 @@ async function criar({ container, manifesto = 'assets/render/tour360/manifesto.j
           { const c = gm.ceuParaSol(el); mat.uniforms.ceuTopo.value.set(...c.topo); mat.uniforms.ceuHoriz.value.set(...c.horiz); } // sky of the hour in the window
           this.el = el; // night (sun below -2 deg): the window shows our render's night city, not Google's day photos
           // 08/10 glass reflection (varanda looking in): mask of this point's facade glass, if it has one
-          const cv = PTS[id].camadas && PTS[id].camadas.vidro; mat.uniforms.usaVidro.value = 0; this.vidro = false;
+          const cv = PTS[id].camadas && PTS[id].camadas.vidro; mat.uniforms.usaVidro.value = 0; this.vidro = false; botaoReflexo();
           { const t = Math.min(1, Math.max(0, (el + 2) / 10)); mat.uniforms.kDiaV.value = t * t * (3 - 2 * t); }
           if (cv && cv.arq) { if (!this.vidros) this.vidros = new Map(); // own loader: the layer LRU of render-mix may dispose textures
             if (!this.vidros.has(cv.arq)) this.vidros.set(cv.arq, new Promise((ok) => new THREE.TextureLoader().load(e.mix.base + cv.arq, (t) => { t.colorSpace = THREE.NoColorSpace; t.generateMipmaps = false; t.minFilter = t.magFilter = THREE.LinearFilter; ok(t); }, undefined, () => ok(null))));
-            this.vidros.get(cv.arq).then((tx) => { if (!tx || atual !== id) return; mat.uniforms.tV.value = tx; mat.uniforms.usaVidro.value = 1; this.vidro = true; vista.acordar(); desenha(); }); }
+            this.vidros.get(cv.arq).then((tx) => { if (!tx || atual !== id) return; mat.uniforms.tV.value = tx; mat.uniforms.usaVidro.value = estado.reflexo === false ? 0 : 1; this.vidro = true; botaoReflexo(); vista.acordar(); desenha(); }); }
           atual = id;
         },
         antes() {
