@@ -130,12 +130,17 @@ bool g3dSome(vec4 c) {
   // 08/10 (Victor: houses below were cut out too, leaving a hole in the ground): only what rises above the line of sight
   // camera -> tower at that point blocks the view. c.w = 1 + roof height of the building (cena3d montaMapaPredios)
   float hLinha = mix(uCamB5.y, uAlvoB5.y, t), hTopo = c.w - 1.0;
-  bool entre = t > 0.05 && t < 0.93 && d < c.z * 0.8 + 6.0 && length(c.xy - b) > 20.0 && hTopo > hLinha - 4.0;
+  bool entre = t > 0.05 && t < 0.93 && d < c.z * 0.8 + 14.0 && length(c.xy - b) > 20.0 && hTopo > hLinha - 4.0; // 08/10: +14 m = the tower's half width (edges were left covered)
   bool naCamera = length(c.xy - a) < c.z * 0.8 + 2.0 && uCamB5.y < hTopo + 8.0; // 08/10: only when the camera is at the building's height, not flying over its roof (houses below an aerial camera vanished)
   return entre || naCamera;
 }
 bool g3dFantasma(vec3 p) {
   if (uMapaR.w < 0.5) return false;
+  if (uRet.x < uRet.z && gl_FragCoord.x > uRet.x && gl_FragCoord.x < uRet.z && gl_FragCoord.y > uRet.y && gl_FragCoord.y < uRet.w && vProf < uProf) {
+    float ch = 3.8;
+    if (uTerrExt > 0.0) { vec2 rq0 = (p.xz + uTerrExt) / (2.0 * uTerrExt); if (all(greaterThan(rq0, vec2(0.0))) && all(lessThan(rq0, vec2(1.0)))) ch = texture2D(uTerr, rq0).b * 60.0 - 20.0; }
+    if (p.y > ch + 6.0) return true; // 08/10 (Victor: walls of neighbours still in front of the tower)
+  }
   // keep the ground: 1.2 m above the real terrain (our city's street map), or 5 m where there is no terrain data
   float chao = 3.8;
   if (uTerrExt > 0.0) { vec2 rq = (p.xz + uTerrExt) / (2.0 * uTerrExt); if (all(greaterThan(rq, vec2(0.0))) && all(lessThan(rq, vec2(1.0)))) chao = texture2D(uTerr, rq).b * 60.0 - 20.0; }
@@ -191,7 +196,7 @@ export function iniciarGoogle() {
       s.tomar = (quem, pai, matriz, cam, erro) => {
         if (s.dono !== quem) {
           if (s.dono && s.dono.restauraCache) s.dono.restauraCache(); // the 360 photo freed the tiles: the next view gets its budget back
-          s._recFeito = false; if (s.recorte) s.recorte.mapaR.value.w = 0; // building ghosts only in the outside view (cena3d turns them on)
+          s._recFeito = false; if (s.recorte) { s.recorte.mapaR.value.w = 0; s.recorte.ret.value.set(1, 1, 0, 0); } // building ghosts only in the outside view (cena3d turns them on)
           for (const c of [...tiles.cameras]) tiles.deleteCamera(c);
           tiles.setCamera(cam);
           const g = tiles.group; if (g.parent !== pai) { g.parent?.remove(g); pai.add(g); }
@@ -824,6 +829,8 @@ export async function ligarGoogleCena({ scene, camera, renderer, ref, aoMudar, e
     terreno(tex, ext) { s.recorte.terr.value = tex; s.recorte.terrExt.value = ext; },
     mapaPredios(tex, minX, minZ, tam) { s.recorte.mapa.value = tex; s.recorte.mapaR.value.set(minX, minZ, 1 / tam, 0); },
     fantasma(cam, alvo) { if (!s.recorte.mapa.value) return; s.recorte.mapaR.value.w = cam ? 1 : 0; if (cam) { s.recorte.camB5.value.copy(cam); s.recorte.alvoB5.value.copy(alvo); } },
+    // our tower's box on screen (drawing-buffer px, y up) + its nearest view depth; null = off
+    telaTorre(r, prof) { if (r) { s.recorte.ret.value.set(r[0], r[1], r[2], r[3]); s.recorte.prof.value = prof; } else s.recorte.ret.value.set(1, 1, 0, 0); },
     // the shadow-overlay material drops the same fragments (no shadow painted on clipped / ghosted Google surfaces)
     aplicarRecorte(material) { material.onBeforeCompile = s.shaderRecorte; material.customProgramCacheKey = () => 'g3d-recorte-sombra'; material.needsUpdate = true; },
     // (kept for the API; Google now stays on at night with its own night light)

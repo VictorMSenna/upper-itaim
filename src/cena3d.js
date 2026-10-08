@@ -655,6 +655,7 @@ export function criarCena({ container, predio, unidades, teste = false,
       if (!mapaPrediosFeito && entB7.carregado && entB7.grupo) { mapaPrediosFeito = true; montaMapaPredios(); }
       if (!terrenoFeito && entB7.grupo) entB7.grupo.traverse((o) => { const u = !terrenoFeito && o.material && o.material.uniforms; if (u && u.uRua && u.uRua.value && u.uRuaOn && u.uRuaOn.value > 0.5) { terrenoFeito = true; gCena.terreno(u.uRua.value, u.uRuaExt.value); } });
       gCena.fantasma(camera.position, ALVO_FANT);
+      { const [r, prof] = caixaTorreNaTela(); gCena.telaTorre(r, prof); } // anything of Google's in front of the tower goes (08/10)
       if (!matSombraG.__recorte) { matSombraG.__recorte = true; gCena.aplicarRecorte(matSombraG); }
       const fundo = scene.background, ac = renderer.autoClear;
       camera.layers.set(0); camera.layers.enable(1); renderer.render(scene, camera);
