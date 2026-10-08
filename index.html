@@ -96,7 +96,7 @@ h1, h2, h3 { margin: 0; text-wrap: balance; }
 .ab-topo { position: absolute; z-index: 2; top: calc(env(safe-area-inset-top, 0px) + 14px); left: 16px; right: 16px; display: flex; justify-content: space-between; align-items: center; gap: 12px; font-size: 12px; color: var(--texto-2); }
 .ab-topo > span:first-child { background: rgba(16,18,17,.55); padding: 5px 10px; border-radius: 999px; -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); }
 .ab-topo b { color: var(--texto); font-weight: 600; letter-spacing: .04em; }
-.ab-logo { display: block; height: 34px; width: auto; }
+.ab-logo { display: block; height: 46px; width: auto; filter: drop-shadow(0 1px 3px rgba(0,0,0,.55)); } /* 08/10 Victor: logo too small to read (was 34 px) */
 .ab-topo > span:first-child { display: flex; align-items: center; gap: 6px; }
 .ab-texto { position: relative; flex: none; padding: 6px 22px calc(env(safe-area-inset-bottom, 0px) + var(--legal-h) + 18px); display: grid; gap: 10px; max-width: 640px; }
 .ab-lugar { margin: 0; font: 600 11.5px var(--f-mono); letter-spacing: .14em; text-transform: uppercase; color: var(--vidro); }
@@ -124,6 +124,7 @@ h1, h2, h3 { margin: 0; text-wrap: balance; }
   .ab-fatos { font-size: 14px; }
   .ab-topo { left: 72px; right: auto; }
   .ab-topo > span:first-child { background: none; padding: 0; }
+  .ab-logo { height: 66px; }
 }
 
 /* ---------- stage */
