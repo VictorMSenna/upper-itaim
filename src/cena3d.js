@@ -608,8 +608,8 @@ export function criarCena({ container, predio, unidades, teste = false,
       const flutua = renderer.capabilities.isWebGL2 && gl.getExtension('EXT_color_buffer_float');
       const rt = new THREE.WebGLRenderTarget(N, N, { type: flutua ? THREE.FloatType : THREE.HalfFloatType, minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter, generateMipmaps: false, depthBuffer: true });
       const mat = new THREE.ShaderMaterial({ side: THREE.DoubleSide,
-        vertexShader: 'attribute vec4 _centro; varying vec3 vC; void main() { vC = _centro.xyz; gl_Position = projectionMatrix * viewMatrix * modelMatrix * vec4(position, 1.0); }',
-        fragmentShader: 'varying vec3 vC; void main() { if (vC.x > 9000.0) discard; gl_FragColor = vec4(vC, 1.0); }' });
+        vertexShader: 'attribute vec4 _centro; varying vec3 vC; varying float vY; void main() { vC = _centro.xyz; vec4 w = modelMatrix * vec4(position, 1.0); vY = w.y; gl_Position = projectionMatrix * viewMatrix * w; }', // 08/10: + roof height (alpha) - low houses are not ghosted
+        fragmentShader: 'varying vec3 vC; varying float vY; void main() { if (vC.x > 9000.0) discard; gl_FragColor = vec4(vC, 1.0 + max(vY, 0.0)); }' });
       const cena = new THREE.Scene(), pais = new Map();
       entB7.grupo.traverse((o) => { if (o.isMesh && !o.isInstancedMesh && o.geometry && o.geometry.attributes._centro) pais.set(o, o.parent); });
       const cam = new THREE.OrthographicCamera(-TAM / 2, TAM / 2, TAM / 2, -TAM / 2, 1, 3000);

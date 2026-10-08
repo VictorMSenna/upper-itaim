@@ -423,7 +423,7 @@ async function carregaManifestoTour360() {
 // without the fixture seen in the clips). Returns the manifest OBJECT (base = folder of the manifest) or null.
 const LUZES_CONFIRMADAS = ['teto', 'abajur', 'cozinha'];
 // v4: fora (window mask, also used by the Google city), albedo/normal/solvis/solind (minute-by-minute sun) are data layers, not lights
-const CAMADAS_BASE = ['ceu', 'sol', 'noite', 'fora', 'albedo', 'normal', 'solvis', 'solind'];
+const CAMADAS_BASE = ['ceu', 'sol', 'noite', 'fora', 'albedo', 'normal', 'solvis', 'solind', 'vidro'];
 function limparManifesto360(man, url) {
   if (!man || !Array.isArray(man.pontos)) return null;
   const completo = (p) => p && p.id && p.camadas && p.camadas.ceu && p.camadas.ceu.arq;

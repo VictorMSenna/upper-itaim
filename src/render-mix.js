@@ -56,6 +56,13 @@ vec3 decod(vec3 v, float kn, float kn2, float yb, float ym, float gL){
 }
 uniform vec3 wb;
 uniform float expo;
+// 08/10 local adaptation (Victor: noon highlights blown at the entrance; room too dark seen from the balcony door): a blurred
+// log-luminance map of this panorama (tLoc: r = log2 lum, g = room coverage) pulls each area toward the panorama's mean
+// key (lG), by sLoc stops per stop, at most +-1.5 stops; the window keeps its own exposure. modoLum = write that map.
+uniform float modoLum;
+uniform sampler2D tLoc;
+uniform float sLoc;
+uniform float lG;
 uniform sampler2D tFora;
 uniform float usaFora;
 uniform float fatorFora;
@@ -126,7 +133,10 @@ void main(){
     s += gDir * alb * max(dot(n, solDir), 0.0) * visSol(vUv);
   }
   vec3 x = s * wb * expo;
-  if (usaFora > 0.5) x *= mix(1.0, fatorFora, texture2D(tFora, vUv).r); // v4: window exposed on its own
+  float fo = usaFora > 0.5 ? texture2D(tFora, vUv).r : 0.0;
+  if (modoLum > 0.5) { float l0 = max(dot(x, vec3(0.2126, 0.7152, 0.0722)), 1e-6); gl_FragColor = vec4(clamp((log2(l0) + 16.0) / 20.0, 0.0, 1.0), 1.0 - fo, 0.0, 1.0); return; }
+  if (usaFora > 0.5) x *= mix(1.0, fatorFora, fo); // v4: window exposed on its own
+  if (sLoc > 0.0) { vec4 q = texture2D(tLoc, vUv); float r = exp2(clamp((lG - (q.r * 20.0 - 16.0)) * sLoc, -1.5, 1.5)); x *= mix(1.0, r, smoothstep(0.05, 0.3, q.g) * (1.0 - fo)); }
   float l = dot(x, vec3(0.2126, 0.7152, 0.0722));
   x *= (1.0 + 1.0 / ombro) / (1.0 + l / ombro);   // soft highlight roll-off; 08/10 Victor: white bed blown in daylight -> stronger shoulder (1.1)
   vec3 o = neutral(x);
@@ -209,13 +219,29 @@ export class MisturaPonto {
       vertexShader: VERT, fragmentShader: FRAG, depthTest: false, depthWrite: false,
       uniforms: { t: { value: Array(7).fill(PRETO) }, g: { value: Array.from({ length: 7 }, () => new THREE.Vector3()) },
         esc: { value: Array(7).fill(1) }, gama: { value: 2.2 }, ombro: { value: +(new URLSearchParams(location.search).get('ombro')) || 1.1 }, joelho: { value: Array(7).fill(0) }, joelho2: { value: Array(7).fill(0.95) }, gamaL: { value: Array(7).fill(2.2) }, y2: { value: Array(7).fill(2) }, ymax: { value: Array(7).fill(4) }, wb: { value: new THREE.Vector3(1, 1, 1) }, expo: { value: 1 }, srgb: { value: half ? 0 : 1 },
-        tFora: { value: PRETO }, usaFora: { value: 0 }, fatorFora: { value: 1 },
+        tFora: { value: PRETO }, usaFora: { value: 0 }, fatorFora: { value: 1 }, modoLum: { value: 0 }, tLoc: { value: PRETO }, sLoc: { value: 0 }, lG: { value: 0 },
         tAlb: { value: PRETO }, tNor: { value: PRETO }, tVis: { value: PRETO }, tVis2: { value: PRETO }, nInt: { value: 0 }, usaVis: { value: 0 }, gDir: { value: new THREE.Vector3() },
         solDir: { value: new THREE.Vector3(0, 0, 1) }, meioMin: { value: 0 }, visTam: { value: new THREE.Vector2(1, 1) }, raioVis: { value: Number.isFinite(parseFloat(new URLSearchParams(location.search).get('visr'))) ? parseFloat(new URLSearchParams(location.search).get('visr')) : (capacidade().nivel === 'topo' ? 2 : 1) }, pesoN: { value: new URLSearchParams(location.search).get('visn') === '0' ? 0 : 1 } }, // ?visr=0 = old look, ?visn=0 = no normal weight (tests)
     });
     this.quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.mat);
     this.cena = new THREE.Scene(); this.cena.add(this.quad);
     this.cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+    // local adaptation maps (see FRAG): 512x256 log-luminance -> 64x32 blur (+-20 deg gaussian, wraps around in longitude)
+    const mapa = (w, h) => { const t = new THREE.WebGLRenderTarget(w, h, { type: THREE.UnsignedByteType, depthBuffer: false, generateMipmaps: false });
+      t.texture.minFilter = t.texture.magFilter = THREE.LinearFilter; t.texture.wrapS = THREE.RepeatWrapping; t.texture.colorSpace = THREE.NoColorSpace; return t; };
+    this.rtLum = mapa(512, 256); this.rtLoc = mapa(64, 32); this.bufLoc = new Uint8Array(64 * 32 * 4);
+    this.matBorra = new THREE.ShaderMaterial({ vertexShader: VERT, depthTest: false, depthWrite: false, uniforms: { tL: { value: this.rtLum.texture } }, fragmentShader: `
+precision highp float; varying vec2 vUv; uniform sampler2D tL;
+void main(){
+  float s = 0.0, w = 0.0, wt = 0.0;
+  for (int j = -4; j <= 4; j++) for (int i = -4; i <= 4; i++) {
+    float k = exp(-float(i * i + j * j) / 8.0);
+    vec4 c = texture2D(tL, vUv + vec2(float(i) * 0.0139, float(j) * 0.0278));
+    s += (c.r * 20.0 - 16.0) * c.g * k; w += c.g * k; wt += k;
+  }
+  gl_FragColor = vec4(w > 1e-3 ? (s / w + 16.0) / 20.0 : 0.5, w / wt, 0.0, 1.0);
+}` });
+    this.cenaBorra = new THREE.Scene(); this.cenaBorra.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.matBorra));
   }
   textura(rel, dados = false, inteira = false) {
     if (!rel) return Promise.resolve(null);
@@ -353,11 +379,27 @@ export class MisturaPonto {
     const K = U.expo.value;
     for (let i = 0; i < 7; i++) U.esc.value[i] *= K;
     U.gDir.value.multiplyScalar(K); U.expo.value = 1;
+    // local adaptation: day strength 0.5, night 0.2 (keeps the mood of the lamps); ?sloc= tests, ?sloc=0 = off
+    const qs = new URLSearchParams(location.search).get('sloc'), sDia = qs !== null && qs !== '' ? +qs : 0.6;
+    U.sLoc.value = 0;
+    if (sDia > 0) {
+      U.modoLum.value = 1; this.r.setRenderTarget(this.rtLum); this.r.render(this.cena, this.cam); U.modoLum.value = 0;
+      this.r.setRenderTarget(this.rtLoc); this.r.render(this.cenaBorra, this.cam);
+      this.r.readRenderTargetPixels(this.rtLoc, 0, 0, 64, 32, this.bufLoc);
+      let sl = 0, sw = 0; // panorama key = coverage- and solid-angle-weighted mean of log2 lum
+      for (let j = 0; j < 32; j++) { const ca = Math.cos(((j + 0.5) / 32 - 0.5) * Math.PI); for (let i = 0; i < 64; i++) { const k = (j * 64 + i) * 4, w = (this.bufLoc[k + 1] / 255) * ca; sl += ((this.bufLoc[k] / 255) * 20 - 16) * w; sw += w; } }
+      U.lG.value = sw > 0 ? sl / sw : 0; U.tLoc.value = this.rtLoc.texture; U.sLoc.value = sDia * (0.4 + 0.6 * kDia);
+      // day key on the GEOMETRIC mean (08/10): the arithmetic mean was ruled by small sun patches (porta-varanda 15h exposed
+      // 20x lower than the entrance, the room behind went black). Points Victor approved sit at log2 -4.0..-4.8: pull each
+      // toward -4.3 (-1..+2 stops), daytime only; night keeps the lamp rule
+      const kq = new URLSearchParams(location.search).get('chave'), T = kq ? +kq : -4.3;
+      if (sw > 0) U.expo.value = 2 ** (Math.max(-1, Math.min(2, (T - U.lG.value) * 1.0)) * kDia);
+    }
     this.r.setRenderTarget(this.rt); this.r.render(this.cena, this.cam); this.r.setRenderTarget(null);
-    this.ultimo = { ...pl, expo: K };
+    this.ultimo = { ...pl, expo: K * U.expo.value, lG: U.lG.value + Math.log2(U.expo.value) };
     return this.rt.texture;
   }
-  liberar() { this.rt.dispose(); this.mat.dispose(); for (const p of this.cache.values()) p.then((t) => t && t.dispose()); }
+  liberar() { this.rt.dispose(); this.mat.dispose(); this.rtLum.dispose(); this.rtLoc.dispose(); this.matBorra.dispose(); for (const p of this.cache.values()) p.then((t) => t && t.dispose()); }
 }
 export let ALVO = 0.30;   // mean-luminance key (tuned on the proof prints; see RELATORIO-B6)
 export function definirAlvo(x) { ALVO = x; }

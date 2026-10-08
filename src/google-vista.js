@@ -85,12 +85,27 @@ const LUZ_GLSL = `
       vec3 nB = normalize(cross(dFdx(vB5), dFdy(vB5)));
       bool verde = cB.g > cB.r * 1.08 && cB.g > cB.b * 1.04;
       if (!verde && abs(nB.y) < 0.5 && vB5.y > 3.5) {
-        vec3 tg = normalize(vec3(-nB.z, 0.0, nB.x));
-        float sF = dot(vB5, tg);
+        // window grid along the facade. 08/10 (Victor: 'triangulos, varios formatos'): Google's mesh is a patchwork of
+        // triangles with their own normals, so a grid following each triangle's normal broke every window into shards. The
+        // facade direction now comes from OUR city's walls (fachadas-angulo.webp, angle mod 90 deg): every triangle of a
+        // facade uses the same axis -> rectangles in rows and columns. Outside the map: the old per-triangle axis.
+        vec2 tgv = normalize(vec2(-nB.z, nB.x) + 1e-5); float lado = floor(nB.x * 3.0) * 17.0 + floor(nB.z * 3.0) * 5.0; float alin = 1.0, temMapa = 0.0;
+        if (uAngExt > 0.0) {
+          vec2 ru = (vB5.xz + uAngExt) / (2.0 * uAngExt);
+          vec3 an = texture2D(uAng, ru).rgb;
+          if (an.b > 0.35 && all(greaterThan(ru, vec2(0.0))) && all(lessThan(ru, vec2(1.0)))) {
+            float t = atan(an.g * 2.0 - 1.0, an.r * 2.0 - 1.0) * 0.25;
+            vec2 e1 = vec2(cos(t), sin(t)), e2 = vec2(-e1.y, e1.x);
+            float d1 = dot(nB.xz, e1), d2 = dot(nB.xz, e2);
+            if (abs(d1) > abs(d2)) { tgv = e2; lado = sign(d1) * 17.0; } else { tgv = e1; lado = 40.0 + sign(d2) * 17.0; } temMapa = 1.0; alin = smoothstep(0.80, 0.90, max(abs(d1), abs(d2)) / max(length(nB.xz), 1e-4)); // triangles > ~30 deg off the facade (balcony zig-zag) get no window: they only made shards
+          }
+        }
+        float sF = dot(vB5.xz, tgv);
         vec2 cel = vec2(floor(sF / 3.1), floor(vB5.y / 2.85));
         vec2 f = vec2(fract(sF / 3.1), fract(vB5.y / 2.85));
-        float jan = smoothstep(0.22, 0.27, f.x) * (1.0 - smoothstep(0.73, 0.78, f.x)) * smoothstep(0.36, 0.41, f.y) * (1.0 - smoothstep(0.80, 0.85, f.y));
-        float id = g3dH21(cel + floor(nB.xz * 3.0) * 17.0 + floor(vB5.xz / 40.0) * 3.1);
+        float jan = smoothstep(0.20, 0.24, f.x) * (1.0 - smoothstep(0.76, 0.80, f.x)) * smoothstep(0.34, 0.38, f.y) * (1.0 - smoothstep(0.84, 0.88, f.y));
+        float id = g3dH21(cel + lado + floor(vB5.xz / 40.0) * 3.1);
+        jan *= mix(1.0, alin, temMapa);${typeof location !== 'undefined' && /[?&]gangdbg=1/.test(location.search) ? ' outgoingLight = vec3(temMapa, alin, jan) * 0.6; cB = vec3(0.0);' : ''} // ?gangdbg=1: R = facade map here, G = triangle on the facade axis, B = window
         float acesa = step(id, uFracG) * jan;
         float lum = dot(cB, vec3(0.2126, 0.7152, 0.0722));
         float vidro = 1.0 - smoothstep(0.18, 0.5, lum);
@@ -112,7 +127,10 @@ bool g3dSome(vec4 c) {
   float d = length(c.xy - (a + ab * t));
   // only buildings that really stand on the line of sight to the tower (Victor 07/10: they vanished too early). c.z = the
   // building's radius; the tower is ~12 m wide
-  bool entre = t > 0.05 && t < 0.93 && d < c.z * 0.8 + 6.0 && length(c.xy - b) > 20.0;
+  // 08/10 (Victor: houses below were cut out too, leaving a hole in the ground): only what rises above the line of sight
+  // camera -> tower at that point blocks the view. c.w = 1 + roof height of the building (cena3d montaMapaPredios)
+  float hLinha = mix(uCamB5.y, uAlvoB5.y, t), hTopo = c.w - 1.0;
+  bool entre = t > 0.05 && t < 0.93 && d < c.z * 0.8 + 6.0 && length(c.xy - b) > 20.0 && hTopo > hLinha - 4.0;
   bool naCamera = length(c.xy - a) < c.z * 0.8 + 2.0;
   return entre || naCamera;
 }
@@ -195,21 +213,23 @@ export function iniciarGoogle() {
         ret: { value: new THREE.Vector4(1, 1, 0, 0) }, prof: { value: 0 },
         luz: { value: new THREE.Vector3(1, 1, 1) }, noite: { value: 0 }, frac: { value: 0.25 },
         mapa: { value: null }, mapaR: { value: new THREE.Vector4(0, 0, 0, 0) }, camB5: { value: new THREE.Vector3() }, alvoB5: { value: new THREE.Vector3() },
-        terr: { value: null }, terrExt: { value: 0 } };
+        terr: { value: null }, terrExt: { value: 0 }, ang: { value: null }, angExt: { value: 0 } };
       const shaderRecorte = (sh) => {
         sh.uniforms.uRecLiga = s.recorte.liga; sh.uniforms.uRecMin = s.recorte.min; sh.uniforms.uRecMax = s.recorte.max; sh.uniforms.uParaB5 = s.recorte.paraB5;
         sh.uniforms.uRet = s.recorte.ret; sh.uniforms.uProf = s.recorte.prof;
         sh.uniforms.uLuz = s.recorte.luz; sh.uniforms.uNoiteG = s.recorte.noite; sh.uniforms.uFracG = s.recorte.frac;
         sh.uniforms.uMapaP = s.recorte.mapa; sh.uniforms.uMapaR = s.recorte.mapaR; sh.uniforms.uCamB5 = s.recorte.camB5; sh.uniforms.uAlvoB5 = s.recorte.alvoB5;
-        sh.uniforms.uTerr = s.recorte.terr; sh.uniforms.uTerrExt = s.recorte.terrExt;
+        sh.uniforms.uTerr = s.recorte.terr; sh.uniforms.uTerrExt = s.recorte.terrExt; sh.uniforms.uAng = s.recorte.ang; sh.uniforms.uAngExt = s.recorte.angExt;
         sh.vertexShader = 'uniform mat4 uParaB5;\nvarying vec3 vB5;\nvarying float vProf;\n' + sh.vertexShader.replace('#include <project_vertex>', '#include <project_vertex>\nvB5 = (uParaB5 * modelMatrix * vec4(transformed, 1.0)).xyz;\nvProf = -mvPosition.z;');
         sh.fragmentShader = 'uniform float uRecLiga;\nuniform vec3 uRecMin;\nuniform vec3 uRecMax;\nuniform vec4 uRet;\nuniform float uProf;\nvarying vec3 vB5;\nvarying float vProf;\n'
-          + 'uniform vec3 uLuz;\nuniform float uNoiteG;\nuniform float uFracG;\nfloat g3dH21(vec2 p) { p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }\n'
+          + 'uniform vec3 uLuz;\nuniform float uNoiteG;\nuniform float uFracG;\nuniform sampler2D uAng;\nuniform float uAngExt;\nfloat g3dH21(vec2 p) { p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }\n'
           + FANT_GLSL
           + sh.fragmentShader.replace('#include <opaque_fragment>', LUZ_GLSL + '\n#include <opaque_fragment>').replace('void main() {',
           'void main() {\n  if (uRecLiga > 0.5 && all(greaterThan(vB5, uRecMin)) && all(lessThan(vB5, uRecMax))) discard;\n  if (g3dFantasma(vB5)) discard;');
       };
       s.shaderRecorte = shaderRecorte;
+      // facade orientation of our city's walls (+-2048 m around the B5 origin): straight window rows at night (LUZ_GLSL)
+      new THREE.TextureLoader().load('assets/entorno/fachadas-angulo.webp', (t) => { t.colorSpace = THREE.NoColorSpace; t.minFilter = t.magFilter = THREE.LinearFilter; t.generateMipmaps = false; s.recorte.ang.value = t; s.recorte.angExt.value = 2048; }, undefined, () => { /* optional: old per-triangle grid */ });
       const recortar = (o) => {
         if (!o.isMesh || !o.material || o.material.__recorte) return;
         const m = o.material; m.__recorte = true;
@@ -562,41 +582,73 @@ uniform vec3 luzBase;
 uniform float luzesN;
 uniform float usaCubo;
 uniform float rumoB;
+// 08/10 glass of the facade seen from the balcony (Victor: the city reflected in it was gone; with Google's 3D): tV.r = glass,
+// tV.g = reflectance shape by incidence angle (gera_mascara_vidro.py). The reflected direction is the view direction mirrored
+// across the facade (forward component flips). Photo mode reads it from the same cube; live mode (computers) draws a
+// mirrored camera into tG when the glass, not the window, is on screen (espelho = 1, image flipped in x).
+uniform sampler2D tV;
+uniform float usaVidro;
+uniform float espelho;
+uniform float forcaV;
+uniform float kDiaV;
+// photo cube lookup: scene-frame direction (x mirrored like the sphere) -> local frame of the shot -> face texture
+bool cubo(vec3 d, out vec4 g){
+  float f = -d.x, r = -d.z;
+  vec3 L = vec3(sin(rumoB) * f + cos(rumoB) * r, d.y, -(cos(rumoB) * f - sin(rumoB) * r));
+  g = vec4(0.0);
+  for (int k = 0; k < 4; k++) {
+    if (float(k) >= nOk) break;
+    vec4 c = fM[k] * vec4(L, 1.0);
+    if (c.w <= 0.0) continue;
+    vec2 q = c.xy / c.w;
+    if (abs(q.x) > 1.0 || abs(q.y) > 1.0) continue;
+    vec2 uv = q * 0.5 + 0.5; vec4 a; vec3 w;
+    if (k == 0) { a = texture2D(fA0, uv); w = texture2D(fW0, uv).rgb; }
+    else if (k == 1) { a = texture2D(fA1, uv); w = texture2D(fW1, uv).rgb; }
+    else if (k == 2) { a = texture2D(fA2, uv); w = texture2D(fW2, uv).rgb; }
+    else { a = texture2D(fA3, uv); w = texture2D(fW3, uv).rgb; }
+    g = vec4(a.rgb * luzBase + w * luzesN, a.a);
+    return true;
+  }
+  return false;
+}
+vec3 paraSrgb(vec3 c){ c = max(c, vec3(0.0)); return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c)); }
 void main(){
   float m = texture2D(tM, vUv).r;
-  vec4 g;
-  if (usaCubo > 0.5) { // photo mode: view direction of this sphere texel (scene frame, x mirrored) -> local frame of the shot
-    float phi = vUv.x * 6.28318530718, th = 3.14159265359 * (1.0 - vUv.y);
-    vec3 d = vec3(cos(phi) * sin(th), cos(th), sin(phi) * sin(th));
-    float f = -d.x, r = -d.z;
-    vec3 L = vec3(sin(rumoB) * f + cos(rumoB) * r, d.y, -(cos(rumoB) * f - sin(rumoB) * r));
-    g = vec4(0.0); bool achou = false;
-    for (int k = 0; k < 4; k++) {
-      if (float(k) >= nOk) break;
-      vec4 c = fM[k] * vec4(L, 1.0);
-      if (c.w <= 0.0) continue;
-      vec2 q = c.xy / c.w;
-      if (abs(q.x) > 1.0 || abs(q.y) > 1.0) continue;
-      vec2 uv = q * 0.5 + 0.5; vec4 a; vec3 w;
-      if (k == 0) { a = texture2D(fA0, uv); w = texture2D(fW0, uv).rgb; }
-      else if (k == 1) { a = texture2D(fA1, uv); w = texture2D(fW1, uv).rgb; }
-      else if (k == 2) { a = texture2D(fA2, uv); w = texture2D(fW2, uv).rgb; }
-      else { a = texture2D(fA3, uv); w = texture2D(fW3, uv).rgb; }
-      g = vec4(a.rgb * luzBase + w * luzesN, a.a); achou = true;
-      break;
-    }
-    if (!achou) { gl_FragColor = vec4(0.0); return; } // face not shot yet: our render's city stays
-  } else g = texture2D(tG, gl_FragCoord.xy / res);
-  // sky where Google drew nothing (equirect: v 0.5 = horizon, 1 = zenith)
+  float phi = vUv.x * 6.28318530718, th = 3.14159265359 * (1.0 - vUv.y);
+  vec3 d = vec3(cos(phi) * sin(th), cos(th), sin(phi) * sin(th));
+  // sky where Google drew nothing (equirect: v 0.5 = horizon, 1 = zenith); same elevation for the mirrored direction
   vec3 ceu = mix(ceuHoriz, ceuTopo, smoothstep(0.5, 0.78, vUv.y));
-  gl_FragColor = vec4(mix(ceu, g.rgb * ganho, g.a), m * forca);
-  #include <colorspace_fragment>
+  vec3 rgb = vec3(0.0); float a = 0.0; // premultiplied output (blend ONE, ONE_MINUS_SRC_ALPHA)
+  if (m > 0.002 && espelho < 0.5) { // the window: Google's city where the pano's 'fora' mask is open
+    vec4 g; bool ok = true;
+    if (usaCubo > 0.5) ok = cubo(d, g); else g = texture2D(tG, gl_FragCoord.xy / res);
+    if (ok) { float aw = m * forca; rgb += paraSrgb(mix(ceu, g.rgb * ganho, g.a)) * aw; a += aw; } // face not shot yet: our render's city stays
+  }
+  if (usaVidro > 0.5) {
+    vec2 v = texture2D(tV, vUv).rg;
+    if (v.r > 0.002) {
+      vec4 g; bool ok = true;
+      if (usaCubo > 0.5) ok = cubo(vec3(-d.x, d.y, d.z), g);
+      else if (espelho > 0.5) g = texture2D(tG, vec2(res.x - gl_FragCoord.x, gl_FragCoord.y) / res);
+      else ok = false;
+      if (ok) {
+        float w = v.r * (0.25 + 0.75 * v.g) * forcaV * forca;
+        // day: covers the reflection of our render's city baked in the pano; night: adds the lit city on the dark glass
+        rgb += paraSrgb(mix(ceu, g.rgb * ganho, g.a)) * w; a += w * kDiaV;
+      }
+    }
+  }
+  gl_FragColor = vec4(rgb, min(a, 1.0));
 }`;
 export function materialSobreposicao() {
+  const forcaV = +((typeof location !== 'undefined' && new URLSearchParams(location.search).get('gvidro')) || 0.4); // ?gvidro= tests
   return new THREE.ShaderMaterial({
     vertexShader: VERT, fragmentShader: FRAG, transparent: true, depthTest: false, depthWrite: false,
+    blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneMinusSrcAlphaFactor,
     uniforms: { tG: { value: null }, tM: { value: null }, res: { value: new THREE.Vector2(1, 1) }, ganho: { value: new THREE.Vector3(1, 1, 1) }, forca: { value: 1 }, fA0: { value: null }, fA1: { value: null }, fA2: { value: null }, fA3: { value: null }, fW0: { value: null }, fW1: { value: null }, fW2: { value: null }, fW3: { value: null },
       fM: { value: [new THREE.Matrix4(), new THREE.Matrix4(), new THREE.Matrix4(), new THREE.Matrix4()] }, nF: { value: 0 }, nOk: { value: 0 }, luzBase: { value: new THREE.Vector3(1, 1, 1) }, luzesN: { value: 0 }, usaCubo: { value: 0 }, rumoB: { value: 0 },
+      tV: { value: null }, usaVidro: { value: 0 }, espelho: { value: 0 }, forcaV: { value: forcaV }, kDiaV: { value: 1 },
       ceuTopo: { value: new THREE.Vector3(0.12, 0.27, 0.6) }, ceuHoriz: { value: new THREE.Vector3(0.55, 0.66, 0.8) } },
   });
 }

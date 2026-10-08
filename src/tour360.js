@@ -302,6 +302,12 @@ async function criar({ container, manifesto = 'assets/render/tour360/manifesto.j
           sess.definirLuz(el); mat.uniforms.ganho.value.setScalar((window.__g3dGanho && window.__g3dGanho.dia) || 1.35);
           { const c = gm.ceuParaSol(el); mat.uniforms.ceuTopo.value.set(...c.topo); mat.uniforms.ceuHoriz.value.set(...c.horiz); } // sky of the hour in the window
           this.el = el; // night (sun below -2 deg): the window shows our render's night city, not Google's day photos
+          // 08/10 glass reflection (varanda looking in): mask of this point's facade glass, if it has one
+          const cv = PTS[id].camadas && PTS[id].camadas.vidro; mat.uniforms.usaVidro.value = 0; this.vidro = false;
+          { const t = Math.min(1, Math.max(0, (el + 2) / 10)); mat.uniforms.kDiaV.value = t * t * (3 - 2 * t); }
+          if (cv && cv.arq) { if (!this.vidros) this.vidros = new Map(); // own loader: the layer LRU of render-mix may dispose textures
+            if (!this.vidros.has(cv.arq)) this.vidros.set(cv.arq, new Promise((ok) => new THREE.TextureLoader().load(e.mix.base + cv.arq, (t) => { t.colorSpace = THREE.NoColorSpace; t.generateMipmaps = false; t.minFilter = t.magFilter = THREE.LinearFilter; ok(t); }, undefined, () => ok(null))));
+            this.vidros.get(cv.arq).then((tx) => { if (!tx || atual !== id) return; mat.uniforms.tV.value = tx; mat.uniforms.usaVidro.value = 1; this.vidro = true; vista.acordar(); desenha(); }); }
           atual = id;
         },
         antes() {
@@ -311,6 +317,8 @@ async function criar({ container, manifesto = 'assets/render/tour360/manifesto.j
           let janela = null;
           if (mostrar) {
             camera.updateMatrixWorld(true); janela = vista.janelaNaTela(camera);
+            mat.uniforms.espelho.value = 0;
+            if (!janela && this.vidro) janela = { x0: -1, y0: -1, x1: 1, y1: 1, espelho: true }; // looking into the flat from the balcony: the glass reflects the city
             if (!janela) {
               // looking at the room, not the window: keep downloading the window view (yaw 0 of this point), nothing drawn
               mostrar = false; malha.visible = false; vista.credito.hidden = true;
@@ -330,6 +338,7 @@ async function criar({ container, manifesto = 'assets/render/tour360/manifesto.j
             vista.tamanho(tam.x, tam.y, k);
             camera.updateMatrixWorld(true); camera.getWorldDirection(dir);
             malha.position.copy(camera.position);
+            if (janela.espelho) { dir.x = -dir.x; mat.uniforms.espelho.value = 1; } // mirrored across the facade (forward = -x flips); the shader flips the image back
             vista.desenha(dir, camera.fov, camera.aspect, janela);
             vista.progresso(true);
             const op = vista.opacidade(); mat.uniforms.forca.value = op; if (op < 1) vista.acordar(); // keep frames coming during the fade
@@ -348,8 +357,8 @@ async function criar({ container, manifesto = 'assets/render/tour360/manifesto.j
           try {
             vista.passoFoto();
             camera.updateMatrixWorld(true); const janela = vista.janelaNaTela(camera);
-            const ve = !!janela && !andando;
-            malha.visible = ve && vista.pronto; malha.position.copy(camera.position);
+            const ve = (!!janela || this.vidro) && !andando; // the balcony glass reflects the picture too
+            malha.visible = ve && vista.pronto; malha.position.copy(camera.position); mat.uniforms.espelho.value = 0;
             mat.uniforms.usaCubo.value = 1; { const F = vista.foto, U = mat.uniforms; U.nF.value = F.alvos.length; U.nOk.value = F.feito ? F.alvos.length : F.i;
               F.alvos.forEach((a, k) => { U['fA' + k].value = a.A.texture; U['fW' + k].value = a.W.texture; U.fM.value[k].copy(F.mats[k]); }); }
             { const L = gm.luzDaCidade(this.el); mat.uniforms.luzBase.value.set(...L.base); mat.uniforms.luzesN.value = L.luzes; } // hour of the day on the picture
@@ -361,7 +370,7 @@ async function criar({ container, manifesto = 'assets/render/tour360/manifesto.j
             if (window.__g3d && window.__g3d.erro && /403|429|quota|key|denied|permission/i.test(window.__g3d.erro)) throw new Error(window.__g3d.erro);
           } catch (err) { falhou = true; malha.visible = false; vista.credito.hidden = true; try { vista.liberar(); } catch (e2) { /* ignore */ } console.warn('google3d desligado', err && err.message); }
         },
-        liberar() { malha.geometry.dispose(); mat.dispose(); cena.remove(malha); vista.liberar(); },
+        liberar() { malha.geometry.dispose(); mat.dispose(); cena.remove(malha); vista.liberar(); if (this.vidros) for (const p of this.vidros.values()) p.then((t) => t && t.dispose()); },
       };
       window.__g3dVista = G;
       G.aposPintar(estado.ponto, esfera(estado.ponto));
@@ -398,7 +407,7 @@ ${navigator.userAgent.slice(0, 120)}`; };
     hotspots: () => { const r = cv.getBoundingClientRect(); return grupoHot.children.map((m) => { const v = m.position.clone().project(camera);
       return { id: m.userData.id, x: r.left + (v.x * 0.5 + 0.5) * r.width, y: r.top + (-v.y * 0.5 + 0.5) * r.height, visivel: v.z < 1 && Math.abs(v.x) < 1 && Math.abs(v.y) < 1 }; }); },
     cursor: () => cv.className,
-    estado: () => ({ ...estado, luzes: { ...estado.luzes }, yaw, pitch, fov, expo: esfera(estado.ponto).mix.ultimo?.expo, google: G ? { ...(window.__g3d || {}), ms: G.perf.n ? G.perf.ms / G.perf.n : 0, max: G.perf.max, n: G.perf.n } : null }),
+    estado: () => ({ ...estado, luzes: { ...estado.luzes }, yaw, pitch, fov, expo: esfera(estado.ponto).mix.ultimo?.expo, lG: esfera(estado.ponto).mix.ultimo?.lG, google: G ? { ...(window.__g3d || {}), ms: G.perf.n ? G.perf.ms / G.perf.n : 0, max: G.perf.max, n: G.perf.n } : null }),
     fechar: () => fechar(true),
     renderer,
   };
