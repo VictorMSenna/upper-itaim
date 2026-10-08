@@ -46,6 +46,13 @@ uniform float joelho2[7];
 uniform float gamaL[7];
 uniform float y2[7];
 uniform float ymax[7];
+// 08/10 13h 12-bit lamp layers (Victor: rings at night with the lamps, 'de uma vez por todas'): <lamp>.webp = top 8 bits,
+// <lamp>-lo.webp = low 4 bits x 17 (recodifica_luzes_12bits.py); v = hi*4080/4095 + lo*15/4095 is linear in both textures,
+// so bilinear filtering stays exact. loIdx[i] = which tL holds layer i's low bits (-1 = none). COM_LO needs 16 texture units.
+uniform float loIdx[7];
+#ifdef COM_LO
+uniform sampler2D tL0; uniform sampler2D tL1; uniform sampler2D tL2;
+#endif
 // lit walls between joelho and joelho2 (log up to y2), the lamps themselves above joelho2 (log from y2 up to ymax)
 vec3 decod(vec3 v, float kn, float kn2, float yb, float ym, float gL){
   if (kn <= 0.0) return pow(v, vec3(gama));
@@ -140,7 +147,7 @@ vec3 neutral(vec3 c){
 }
 void main(){
   vec3 s = vec3(0.0);
-  ${[0, 1, 2, 3, 4, 5, 6].map((i) => `if (g[${i}].r + g[${i}].g + g[${i}].b > 0.0) { vec3 c${i} = texture2D(t[${i}], vUv).rgb; if (joelho[${i}] <= 0.0 && dbT > 0.0) c${i} = deband(t[${i}], vUv, c${i}); s += g[${i}] * esc[${i}] * decod(c${i}, joelho[${i}], joelho2[${i}], y2[${i}], ymax[${i}], gamaL[${i}]); }`).join('\n  ')}
+  ${[0, 1, 2, 3, 4, 5, 6].map((i) => `if (g[${i}].r + g[${i}].g + g[${i}].b > 0.0) { vec3 c${i} = texture2D(t[${i}], vUv).rgb; if (joelho[${i}] <= 0.0 && dbT > 0.0) c${i} = deband(t[${i}], vUv, c${i});\n#ifdef COM_LO\n  if (loIdx[${i}] > -0.5) { vec3 lo${i} = loIdx[${i}] < 0.5 ? texture2D(tL0, vUv).rgb : (loIdx[${i}] < 1.5 ? texture2D(tL1, vUv).rgb : texture2D(tL2, vUv).rgb); c${i} = c${i} * (4080.0 / 4095.0) + lo${i} * (15.0 / 4095.0); }\n#endif\n  s += g[${i}] * esc[${i}] * decod(c${i}, joelho[${i}], joelho2[${i}], y2[${i}], ymax[${i}], gamaL[${i}]); }`).join('\n  ')}
   if (usaVis > 0.5) {
     vec3 alb = pow(texture2D(tAlb, vUv).rgb, vec3(2.2));
     vec3 n = normalize(texture2D(tNor, vUv).rgb * 2.0 - 1.0);
@@ -233,10 +240,13 @@ export class MisturaPonto {
       vertexShader: VERT, fragmentShader: FRAG, depthTest: false, depthWrite: false,
       uniforms: { t: { value: Array(7).fill(PRETO) }, g: { value: Array.from({ length: 7 }, () => new THREE.Vector3()) },
         esc: { value: Array(7).fill(1) }, gama: { value: 2.2 }, ombro: { value: +(new URLSearchParams(location.search).get('ombro')) || 1.1 }, joelho: { value: Array(7).fill(0) }, joelho2: { value: Array(7).fill(0.95) }, gamaL: { value: Array(7).fill(2.2) }, y2: { value: Array(7).fill(2) }, ymax: { value: Array(7).fill(4) }, wb: { value: new THREE.Vector3(1, 1, 1) }, expo: { value: 1 }, srgb: { value: half ? 0 : 1 },
-        tFora: { value: PRETO }, usaFora: { value: 0 }, fatorFora: { value: 1 }, modoLum: { value: 0 }, tLoc: { value: PRETO }, sLoc: { value: 0 }, lG: { value: 0 }, dbR: { value: 14 / w }, dbT: { value: (new URLSearchParams(location.search).get('deband') === '0' ? 0 : 3) / 255 },
+        tFora: { value: PRETO }, usaFora: { value: 0 }, fatorFora: { value: 1 }, modoLum: { value: 0 }, tLoc: { value: PRETO }, sLoc: { value: 0 }, lG: { value: 0 }, dbR: { value: 14 / w }, loIdx: { value: Array(7).fill(-1) }, tL0: { value: PRETO }, tL1: { value: PRETO }, tL2: { value: PRETO }, dbT: { value: (new URLSearchParams(location.search).get('deband') === '0' ? 0 : 3) / 255 },
         tAlb: { value: PRETO }, tNor: { value: PRETO }, tVis: { value: PRETO }, tVis2: { value: PRETO }, nInt: { value: 0 }, usaVis: { value: 0 }, gDir: { value: new THREE.Vector3() },
         solDir: { value: new THREE.Vector3(0, 0, 1) }, meioMin: { value: 0 }, visTam: { value: new THREE.Vector2(1, 1) }, raioVis: { value: Number.isFinite(parseFloat(new URLSearchParams(location.search).get('visr'))) ? parseFloat(new URLSearchParams(location.search).get('visr')) : (capacidade().nivel === 'topo' ? 2 : 1) }, pesoN: { value: new URLSearchParams(location.search).get('visn') === '0' ? 0 : 1 } }, // ?visr=0 = old look, ?visn=0 = no normal weight (tests)
     });
+    // 12-bit lamp layers need 3 more samplers (16 in all); smaller GPUs read the top 8 bits only
+    this.comLo = gl.getParameter(gl.MAX_TEXTURE_IMAGE_UNITS) >= 16 && new URLSearchParams(location.search).get('lo12') !== '0';
+    if (this.comLo) { this.mat.defines = { ...(this.mat.defines || {}), COM_LO: '' }; this.mat.needsUpdate = true; }
     this.quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.mat);
     this.cena = new THREE.Scene(); this.cena.add(this.quad);
     this.cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
@@ -263,7 +273,7 @@ void main(){
     if (!this.cache.has(rel)) this.cache.set(rel, carregaTextura(this.base + rel, this.max, dados, /(^|\/)fora[^/]*$/.test(rel), inteira));
     // (B1) LRU: keep at most 9 layers of this point in memory (ceu + 2 sun + 3 lights + 3 spare)
     const v = this.cache.get(rel); this.cache.delete(rel); this.cache.set(rel, v);
-    while (this.cache.size > 12) { const [k, p] = this.cache.entries().next().value; if (this.emUso && this.emUso.has(k)) break; this.cache.delete(k); p.then((t) => t && t.dispose()); }
+    while (this.cache.size > 16) { const [k, p] = this.cache.entries().next().value; if (this.emUso && this.emUso.has(k)) break; this.cache.delete(k); p.then((t) => t && t.dispose()); }
     return v;
   }
   // (B1) free the layer textures of a point the visitor left (GPU memory); the mixed render target stays
@@ -322,7 +332,12 @@ void main(){
     const visArq = pl.dir ? [].concat(pl.dir.vis.arq) : [];
     const tDir = pl.dir ? await Promise.all([this.textura(C.albedo.arq), this.textura(C.normal.arq), ...visArq.map((a) => this.textura(a, true))]) : null;
     if (pl.dir) for (const a of [C.albedo.arq, C.normal.arq, ...visArq]) this.emUso.add(a);
+    for (const it of pl.lista) if (it.c.lo && this.comLo) this.emUso.add(it.c.lo);
+    const loP = pl.lista.map((it) => (it.c.lo && this.comLo ? this.textura(it.c.lo, false, true) : null));
     const tx = await Promise.all(pl.lista.map((it) => this.textura(it.c.arq, false, !!it.c.joelho)));
+    // low bits already here = used now; still downloading = this picture goes out at 8 bits and is redrawn when they land
+    const txLo = await Promise.all(loP.map((p) => (p ? Promise.race([p, Promise.resolve(undefined)]) : null)));
+    if (txLo.some((t) => t === undefined)) Promise.all(loP).then(() => { if (this.aoRefinar) this.aoRefinar(); }).catch(() => {});
     const U = this.mat.uniforms;
     U.usaVis.value = tDir && tDir.every(Boolean) ? 1 : 0;
     if (U.usaVis.value) {
@@ -341,6 +356,8 @@ void main(){
     for (let i = 0; i < 7; i++) {
       const it = pl.lista[i];
       U.t.value[i] = (it && tx[i]) || PRETO;
+      U.loIdx.value[i] = -1;
+      if (it && txLo[i]) { const k = U.loIdx.value.filter((x) => x >= 0).length; if (k < 3) { U['tL' + k].value = txLo[i]; U.loIdx.value[i] = k; } }
       U.g.value[i].set(...(it ? it.g : [0, 0, 0]));
       U.esc.value[i] = it ? it.c.escala : 1;
       U.joelho.value[i] = (it && it.c.joelho) || 0; U.joelho2.value[i] = (it && it.c.joelho2) || 0.95; U.y2.value[i] = (it && it.c.y2) || 2; U.ymax.value[i] = (it && it.c.ymax) || 4; U.gamaL.value[i] = (it && it.c.gama) || 2.2;

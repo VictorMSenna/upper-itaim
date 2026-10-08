@@ -91,6 +91,7 @@ async function criar({ container, manifesto = 'assets/render/tour360/manifesto.j
     const mat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 1, depthWrite: false, toneMapped: false });
     const m = new THREE.Mesh(geo, mat); m.position.copy(paraMundo(p.pos)); m.visible = false; cena.add(m);
     const mix = new MisturaPonto(renderer, p, base, { larguraMax, SOL });
+    mix.aoRefinar = () => { if (!fechado && estado.ponto === id) repinta(); }; // 12-bit lamp low bits arrived (render-mix.js)
     const e = { m, mix, pronto: null };
     esferas.set(id, e);
     return e;

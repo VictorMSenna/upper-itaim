@@ -213,19 +213,19 @@ export function iniciarGoogle() {
         ret: { value: new THREE.Vector4(1, 1, 0, 0) }, prof: { value: 0 },
         luz: { value: new THREE.Vector3(1, 1, 1) }, noite: { value: 0 }, frac: { value: 0.25 },
         mapa: { value: null }, mapaR: { value: new THREE.Vector4(0, 0, 0, 0) }, camB5: { value: new THREE.Vector3() }, alvoB5: { value: new THREE.Vector3() },
-        terr: { value: null }, terrExt: { value: 0 }, ang: { value: null }, angExt: { value: 0 } };
+        terr: { value: null }, terrExt: { value: 0 }, ang: { value: null }, angExt: { value: 0 }, lote: { value: Array.from({ length: 24 }, () => new THREE.Vector2()) }, loteN: { value: 0 } };
       const shaderRecorte = (sh) => {
-        sh.uniforms.uRecLiga = s.recorte.liga; sh.uniforms.uRecMin = s.recorte.min; sh.uniforms.uRecMax = s.recorte.max; sh.uniforms.uParaB5 = s.recorte.paraB5;
+        sh.uniforms.uLote = s.recorte.lote; sh.uniforms.uLoteN = s.recorte.loteN; sh.uniforms.uRecLiga = s.recorte.liga; sh.uniforms.uRecMin = s.recorte.min; sh.uniforms.uRecMax = s.recorte.max; sh.uniforms.uParaB5 = s.recorte.paraB5;
         sh.uniforms.uRet = s.recorte.ret; sh.uniforms.uProf = s.recorte.prof;
         sh.uniforms.uLuz = s.recorte.luz; sh.uniforms.uNoiteG = s.recorte.noite; sh.uniforms.uFracG = s.recorte.frac;
         sh.uniforms.uMapaP = s.recorte.mapa; sh.uniforms.uMapaR = s.recorte.mapaR; sh.uniforms.uCamB5 = s.recorte.camB5; sh.uniforms.uAlvoB5 = s.recorte.alvoB5;
         sh.uniforms.uTerr = s.recorte.terr; sh.uniforms.uTerrExt = s.recorte.terrExt; sh.uniforms.uAng = s.recorte.ang; sh.uniforms.uAngExt = s.recorte.angExt;
         sh.vertexShader = 'uniform mat4 uParaB5;\nvarying vec3 vB5;\nvarying float vProf;\n' + sh.vertexShader.replace('#include <project_vertex>', '#include <project_vertex>\nvB5 = (uParaB5 * modelMatrix * vec4(transformed, 1.0)).xyz;\nvProf = -mvPosition.z;');
-        sh.fragmentShader = 'uniform float uRecLiga;\nuniform vec3 uRecMin;\nuniform vec3 uRecMax;\nuniform vec4 uRet;\nuniform float uProf;\nvarying vec3 vB5;\nvarying float vProf;\n'
+        sh.fragmentShader = 'uniform vec2 uLote[24];\nuniform float uLoteN;\nbool g3dNoLote(vec2 p) { bool d = false; for (int i = 0; i < 24; i++) { if (float(i) >= uLoteN) break; vec2 a = uLote[i], b = uLote[i + 1 < 24 ? i + 1 : 0]; if (float(i + 1) >= uLoteN) b = uLote[0]; if ((a.y > p.y) != (b.y > p.y) && p.x < (b.x - a.x) * (p.y - a.y) / (b.y - a.y) + a.x) d = !d; } return d; }\nuniform float uRecLiga;\nuniform vec3 uRecMin;\nuniform vec3 uRecMax;\nuniform vec4 uRet;\nuniform float uProf;\nvarying vec3 vB5;\nvarying float vProf;\n'
           + 'uniform vec3 uLuz;\nuniform float uNoiteG;\nuniform float uFracG;\nuniform sampler2D uAng;\nuniform float uAngExt;\nfloat g3dH21(vec2 p) { p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }\n'
           + FANT_GLSL
           + sh.fragmentShader.replace('#include <opaque_fragment>', LUZ_GLSL + '\n#include <opaque_fragment>').replace('void main() {',
-          'void main() {\n  if (uRecLiga > 0.5 && all(greaterThan(vB5, uRecMin)) && all(lessThan(vB5, uRecMax))) discard;\n  if (g3dFantasma(vB5)) discard;');
+          'void main() {\n  if (uRecLiga > 0.5 && all(greaterThan(vB5, uRecMin)) && all(lessThan(vB5, uRecMax))) discard;\n  if (uRecLiga > 0.5 && uLoteN > 2.5 && vB5.y > uRecMin.y && vB5.y < uRecMax.y && g3dNoLote(vB5.xz)) discard;\n  if (g3dFantasma(vB5)) discard;');
       };
       s.shaderRecorte = shaderRecorte;
       // facade orientation of our city's walls (+-2048 m around the B5 origin): straight window rows at night (LUZ_GLSL)
@@ -673,6 +673,20 @@ export function ganhoParaSol(el, { dia = 1.35, noite = 0.14 } = {}) {
 // ref = { lat, lon, h, rumoX }: geodetic position of the B5 plan origin (sidewalk NW corner, y = 0) and bearing of +x (deg).
 // Scene frame of cena3d = B5 frame (x along +x, y up, z along +x + 90 deg). Our tower is NOT touched or hidden by this; only
 // the old city (B7 + B9 bake) is hidden once Google's tiles are actually visible, and shown again on any failure.
+// polygon offset (miter, capped) for the lot clip: every edge moves out by m metres
+function inflar(P, m) {
+  const pts = P[0][0] === P[P.length - 1][0] && P[0][1] === P[P.length - 1][1] ? P.slice(0, -1) : P.slice();
+  let area = 0; for (let i = 0; i < pts.length; i++) { const a = pts[i], b = pts[(i + 1) % pts.length]; area += a[0] * b[1] - b[0] * a[1]; }
+  const sg = area > 0 ? 1 : -1, n = pts.length, out = [];
+  const nor = (a, b) => { const dx = b[0] - a[0], dy = b[1] - a[1], l = Math.hypot(dx, dy) || 1; return [sg * dy / l, -sg * dx / l]; };
+  for (let i = 0; i < n; i++) {
+    const p = pts[i], n0 = nor(pts[(i - 1 + n) % n], p), n1 = nor(p, pts[(i + 1) % n]);
+    let bx = n0[0] + n1[0], by = n0[1] + n1[1]; const bl = Math.hypot(bx, by) || 1; bx /= bl; by /= bl;
+    const k = Math.min(3, 1 / Math.max(0.33, bx * n1[0] + by * n1[1]));
+    out.push([p[0] + bx * m * k, p[1] + by * m * k]);
+  }
+  return out;
+}
 export async function ligarGoogleCena({ scene, camera, renderer, ref, aoMudar, esconder = [], mostrar = () => {}, recorte = null }) {
   const s = await iniciarGoogle();
   if (!s) return null;
@@ -690,6 +704,9 @@ export async function ligarGoogleCena({ scene, camera, renderer, ref, aoMudar, e
   // our tower's box in the B5 frame (= this scene's frame): Google's mesh of the same building is hidden inside it
   if (recorte && !/[?&]recorte=0/.test(location.search)) {
     s.recorte.min.value.copy(recorte.min); s.recorte.max.value.copy(recorte.max); s.recorte.ecefParaB5 = m.clone(); s.recorte.liga.value = 1;
+    // 08/10 (Victor: walls of Google's own mesh of the building stuck out of the box): the whole LOT (GeoSampa lote_cidadao,
+    // dados/lote-1577.json, B5 xz) inflated by recorte.margemLote metres is cleared too, from the box floor to its top
+    if (recorte.lote && recorte.lote.length >= 3) { const L = inflar(recorte.lote, recorte.margemLote || 1.5).slice(0, 24); L.forEach((p, i) => s.recorte.lote.value[i].set(p[0], p[1])); s.recorte.loteN.value = L.length; }
     s._recFeito = false; if (s.atualizaRecorte) s.atualizaRecorte();
   }
   let ganhoCena = [1, 1, 1];
