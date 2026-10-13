@@ -307,6 +307,7 @@ export class VistaGoogle {
   tamanho(w, h, escala) {
     this.larg = Math.max(2, Math.round(w * escala)); this.alt = Math.max(2, Math.round(h * escala)); this.escala = escala;
     if (this.rt && (this.rt.width !== this.larg || this.rt.height !== this.alt)) { this.rt.dispose(); this.rt = null; }
+    if (this.rtV && (this.rtV.width !== this.larg || this.rtV.height !== this.alt)) { this.rtV.dispose(); this.rtV = null; }
     if (!this.rt) {
       const gl = this.r.getContext();
       const half = this.r.capabilities.isWebGL2 && (gl.getExtension('EXT_color_buffer_float') || gl.getExtension('EXT_color_buffer_half_float'));
@@ -330,9 +331,25 @@ export class VistaGoogle {
     }
     this.dirs = new Float32Array(out);
   }
+  // 13/10 (R3b): the facade glass seen from the balcony gets its own direction list, so the mirror is drawn whenever the
+  // GLASS is on screen, also when the window is on screen at the same time (before: window on screen = no city in the glass)
+  definirVidro(img) {
+    if (!img || img === this.vidroFonte) return;
+    this.vidroFonte = img;
+    const W = 256, H = 128, c = document.createElement('canvas'); c.width = W; c.height = H;
+    const g = c.getContext('2d', { willReadFrequently: true }); g.drawImage(img, 0, 0, W, H);
+    const px = g.getImageData(0, 0, W, H).data, out = [];
+    for (let r = 0; r < H; r++) for (let k = 0; k < W; k++) {
+      if (px[(r * W + k) * 4] < 64) continue;
+      const phi = ((k + 0.5) / W) * 2 * Math.PI, th = Math.PI * (1 - (r + 0.5) / H);
+      out.push(Math.cos(phi) * Math.sin(th), Math.cos(th), Math.sin(phi) * Math.sin(th));
+    }
+    this.dirsV = new Float32Array(out);
+  }
+  vidroNaTela(camera) { return this.dirsV ? this.janelaNaTela(camera, this.dirsV) : { x0: -1, y0: -1, x1: 1, y1: 1 }; }
   // NDC box of the open window as seen by `camera` (scene frame), with a small margin; null = no window on screen
-  janelaNaTela(camera) {
-    const d = this.dirs; if (!d) return { x0: -1, y0: -1, x1: 1, y1: 1 };
+  janelaNaTela(camera, dirs) {
+    const d = dirs || this.dirs; if (!d) return { x0: -1, y0: -1, x1: 1, y1: 1 };
     const m = camera.matrixWorldInverse.elements, p = camera.projectionMatrix.elements;
     let x0 = 2, y0 = 2, x1 = -2, y1 = -2, n = 0;
     for (let i = 0; i < d.length; i += 3) {
@@ -348,7 +365,9 @@ export class VistaGoogle {
     return { x0: cl(x0 - mg), y0: cl(y0 - mg), x1: cl(x1 + mg), y1: cl(y1 + mg) };
   }
   // point the camera and draw the tiles into the target. dir = scene-frame direction; janela = NDC box to load tiles for
-  desenha(dir, fov, aspect, janela, soCarregar = false) {
+  // dirV (13/10, R3b): also draw the mirrored camera (balcony glass) into rtV in the same frame; its selection camera joins the
+  // tiles' camera set so one update loads both views (no thrash between two updates per frame)
+  desenha(dir, fov, aspect, janela, soCarregar = false, dirV = null) {
     if (!this.rt) return;
     const d = this.dirParaL(dir.x, dir.y, dir.z);
     this.cam.position.set(0, 0, 0); this.cam.up.set(0, 1, 0);
@@ -363,12 +382,24 @@ export class VistaGoogle {
     this.janela = { px, py, pw, ph };
     this.s.tomar(this, this.s.escena, this.matriz, cs, ERRO_360);
     this.s.tiles.setResolution(cs, pw, ph); // same pixel density as the full screen (offset narrows the projection)
+    const T = this.s.tiles;
+    if (dirV && !soCarregar) {
+      if (!this.camV) { this.camV = new THREE.PerspectiveCamera(60, 1, 3, 20000); this.camSelV = new THREE.PerspectiveCamera(60, 1, 3, RAIO); }
+      if (!this.rtV) { this.rtV = this.rt.clone(); this.rtV.texture.colorSpace = this.rt.texture.colorSpace; }
+      const cv = this.camV, sv = this.camSelV;
+      cv.position.set(0, 0, 0); cv.up.set(0, 1, 0); cv.fov = fov; cv.aspect = aspect; cv.updateProjectionMatrix();
+      cv.lookAt(this.dirParaL(dirV.x, dirV.y, dirV.z)); cv.updateMatrixWorld(true);
+      sv.position.copy(cv.position); sv.quaternion.copy(cv.quaternion); sv.up.copy(cv.up); sv.fov = fov; sv.aspect = aspect; sv.updateProjectionMatrix(); sv.updateMatrixWorld(true);
+      if (!T.cameras.includes(sv)) T.setCamera(sv);
+      T.setResolution(sv, W, H);
+    } else if (this.camSelV && T.cameras.includes(this.camSelV)) T.deleteCamera(this.camSelV);
     this.s.escena.updateMatrixWorld(true);
     this.s.tiles.update();
     if (soCarregar) { const st = this.s.tiles.stats; if (st.queued + st.downloading + st.parsing > 0 || this.s.tiles.loadProgress < 1) this.acordar(); return; }
     const r = this.r, cc = r.getClearColor(new THREE.Color()), ca = r.getClearAlpha();
     const rtAnt = r.getRenderTarget();
     r.setRenderTarget(this.rt); r.setClearColor(0x000000, 0); r.clear(); r.render(this.s.escena, this.cam);
+    if (dirV && this.rtV) { r.setRenderTarget(this.rtV); r.clear(); r.render(this.s.escena, this.camV); }
     r.setRenderTarget(rtAnt); r.setClearColor(cc, ca);
     const st = this.s.tiles.stats; STATUS.tiles = st ? (st.visible || 0) : 0;
     if (st && (st.queued + st.downloading + st.parsing > 0 || this.s.tiles.loadProgress < 1)) this.acordar();
@@ -559,6 +590,7 @@ export class VistaGoogle {
     for (const ev of ['load-model', 'tiles-load-end', 'needs-update', 'tile-visibility-change']) this.s.tiles.removeEventListener(ev, this._aoCarregar);
     if (this.s.dono === this) { for (const c of [...this.s.tiles.cameras]) this.s.tiles.deleteCamera(c); this.s.dono = null; }
     if (this.rt) this.rt.dispose();
+    if (this.rtV) this.rtV.dispose();
     if (this.foto) { for (const a of this.foto.alvos) { a.A.dispose(); a.W.dispose(); } this.foto = null; }
     try { localStorage.removeItem('tabela3d-foto-ativa'); } catch (e) { /* ignore */ } // leaving the 360 mid-photo is not a crash
     this.restauraCache();
@@ -598,6 +630,15 @@ uniform float forcaV;
 uniform float kDiaV;
 uniform sampler2D tPano;
 uniform float panoSrgb;
+// 13/10 (R3): tGV = mirrored city (live), temJanela = the window part is drawn from tG (0 when tG holds the mirror only);
+// caixaMin/caixaMax = the balcony box around the eye, in (forward +v, up, right) metres: facade glass at caixaMin.x,
+// floor caixaMin.y, parapet line caixaMax.x, ceiling caixaMax.y, side limits z. The reflected ray starts ON the glass, so
+// near things (floor, parapet, walls) are found where that ray leaves the box and read from the panorama at that point.
+uniform sampler2D tGV;
+uniform float temJanela;
+uniform vec3 caixaMin;
+uniform vec3 caixaMax;
+uniform float usaCaixa;
 // photo cube lookup: scene-frame direction (x mirrored like the sphere) -> local frame of the shot -> face texture
 bool cubo(vec3 d, out vec4 g){
   float f = -d.x, r = -d.z;
@@ -627,7 +668,7 @@ void main(){
   // sky where Google drew nothing (equirect: v 0.5 = horizon, 1 = zenith); same elevation for the mirrored direction
   vec3 ceu = mix(ceuHoriz, ceuTopo, smoothstep(0.5, 0.78, vUv.y));
   vec3 rgb = vec3(0.0); float a = 0.0; // premultiplied output (blend ONE, ONE_MINUS_SRC_ALPHA)
-  if (m > 0.002 && espelho < 0.5) { // the window: Google's city where the pano's 'fora' mask is open
+  if (m > 0.002 && temJanela > 0.5) { // the window: Google's city where the pano's 'fora' mask is open
     vec4 g; bool ok = true;
     if (usaCubo > 0.5) ok = cubo(d, g); else g = texture2D(tG, gl_FragCoord.xy / res);
     if (ok) { float aw = m * forca; rgb += paraSrgb(mix(ceu, g.rgb * ganho, g.a)) * aw; a += aw; } // face not shot yet: our render's city stays
@@ -637,9 +678,19 @@ void main(){
     if (v.r > 0.002) {
       vec4 g; bool ok = true;
       if (usaCubo > 0.5) ok = cubo(vec3(-d.x, d.y, d.z), g);
-      else if (espelho > 0.5) g = texture2D(tG, vec2(res.x - gl_FragCoord.x, gl_FragCoord.y) / res);
+      else if (espelho > 0.5) g = texture2D(tGV, vec2(res.x - gl_FragCoord.x, gl_FragCoord.y) / res);
       else ok = false;
       vec2 uvR = vec2(fract(0.5 - vUv.x), vUv.y); // the mirrored direction (forward flips) in the panorama's own uv
+      if (usaCaixa > 0.5) { // R3a (Victor 13/10: 'reflete como se o piso da varanda nao existisse'): parallax of the balcony
+        vec3 L = vec3(-d.x, d.y, -d.z); // forward, up, right
+        vec3 Gp = L * (caixaMin.x / min(L.x, -1e-4)); // point on the glass plane behind the eye
+        vec3 Rd = vec3(-L.x, L.y, L.z); Rd = mix(Rd, vec3(1e-5), step(abs(Rd), vec3(1e-6))); // no division by 0
+        vec3 tA = (caixaMin - Gp) / Rd, tB = (caixaMax - Gp) / Rd, tF = max(tA, tB);
+        float sx = max(min(min(tF.x, tF.y), tF.z), 0.0);
+        vec3 P = Gp + Rd * sx; vec3 q = normalize(vec3(-P.x, P.y, -P.z)); // back to the scene frame
+        float ph = atan(q.z, q.x); ph += step(ph, 0.0) * 6.28318530718;
+        uvR = vec2(ph / 6.28318530718, 1.0 - acos(clamp(q.y, -1.0, 1.0)) / 3.14159265359);
+      }
       // 12/10: the pano's own sky (hidden behind Google) holds HDR fireflies; a 1-2% leak of them through a filtered mask
       // edge sparkled as white dots in the glass -> snap the mask and cap the pano
       float mR = smoothstep(0.1, 0.9, texture2D(tM, uvR).r);
@@ -661,7 +712,7 @@ export function materialSobreposicao() {
     blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneMinusSrcAlphaFactor,
     uniforms: { tG: { value: null }, tM: { value: null }, res: { value: new THREE.Vector2(1, 1) }, ganho: { value: new THREE.Vector3(1, 1, 1) }, forca: { value: 1 }, fA0: { value: null }, fA1: { value: null }, fA2: { value: null }, fA3: { value: null }, fW0: { value: null }, fW1: { value: null }, fW2: { value: null }, fW3: { value: null },
       fM: { value: [new THREE.Matrix4(), new THREE.Matrix4(), new THREE.Matrix4(), new THREE.Matrix4()] }, nF: { value: 0 }, nOk: { value: 0 }, luzBase: { value: new THREE.Vector3(1, 1, 1) }, luzesN: { value: 0 }, usaCubo: { value: 0 }, rumoB: { value: 0 },
-      tV: { value: null }, usaVidro: { value: 0 }, tPano: { value: null }, panoSrgb: { value: 0 }, espelho: { value: 0 }, forcaV: { value: forcaV }, kDiaV: { value: 1 },
+      tV: { value: null }, usaVidro: { value: 0 }, tGV: { value: null }, temJanela: { value: 1 }, caixaMin: { value: new THREE.Vector3(-0.564, -1.55, -1.6) }, caixaMax: { value: new THREE.Vector3(0.34, 0.76, 2.4) }, usaCaixa: { value: 0 }, tPano: { value: null }, panoSrgb: { value: 0 }, espelho: { value: 0 }, forcaV: { value: forcaV }, kDiaV: { value: 1 },
       ceuTopo: { value: new THREE.Vector3(0.12, 0.27, 0.6) }, ceuHoriz: { value: new THREE.Vector3(0.55, 0.66, 0.8) } },
   });
 }

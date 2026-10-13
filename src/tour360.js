@@ -30,6 +30,7 @@ async function criar({ container, manifesto = 'assets/render/tour360/manifesto.j
   const man = typeof manifesto === 'string' ? await (await fetch(manifesto)).json() : manifesto;
   const base = typeof manifesto === 'string' ? manifesto.replace(/[^/]*$/, '') : (man.base || '');
   const PTS = Object.fromEntries(man.pontos.map((p) => [p.id, p]));
+  const REF_LUZ = (() => { const c = PTS.cozinha && PTS.cozinha.camadas && PTS.cozinha.camadas.cozinha; return c ? (c.media_dentro || c.media) : null; })();
   // first view: the middle of the room facing the balcony when it has the new render (window mask = its own exposure +
   // Google city of the unit); otherwise the first point with a window mask; the manifest order last (07/10 Victor)
   const pontoInicial = () => (man.pontos.find((p) => p.id === 'entrada' && p.camadas && p.camadas.fora) || man.pontos.find((p) => p.camadas && p.camadas.fora) || man.pontos[0]).id; // Victor 08/10: the tour starts at the entrance
@@ -97,13 +98,18 @@ async function criar({ container, manifesto = 'assets/render/tour360/manifesto.j
     const mat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 1, depthWrite: false, toneMapped: false });
     const m = new THREE.Mesh(geo, mat); m.position.copy(paraMundo(p.pos)); m.visible = false; cena.add(m);
     const mix = new MisturaPonto(renderer, p, base, { larguraMax, SOL });
-    mix.aoRefinar = () => { if (!fechado && estado.ponto === id) repinta(); }; // 12-bit lamp low bits arrived (render-mix.js)
-    const e = { m, mix, pronto: null };
+    // 12-bit lamp low bits arrived (render-mix.js). 13/10 Victor (R2, rings at night in the kitchen): when they landed
+    // during the walk to this point (estado.ponto still the old one; cached files land in < 600 ms) the repaint was
+    // skipped and the 8-bit picture stayed until the next sun move. Now the point remembers it and repaints on arrival.
+    mix.aoRefinar = () => { if (fechado) return; if (estado.ponto === id) repinta(); else e.refinar = true; };
+    mix.refLuz = REF_LUZ; // R1: one fixed night white balance (the white kitchen light) for every point
+    const e = { m, mix, pronto: null, refinar: false };
     esferas.set(id, e);
     return e;
   }
   async function pinta(id) {
     const e = esfera(id);
+    e.refinar = false; // this paint reads whatever low bits are here now; a later arrival sets it again
     const tx = await e.mix.atualizar(estado);
     e.m.material.map = tx; e.m.material.needsUpdate = true;
     if (G) G.aposPintar(id, e);
@@ -219,6 +225,7 @@ async function criar({ container, manifesto = 'assets/render/tour360/manifesto.j
       estado.ponto = id; raiz.querySelector('.t360-nome').textContent = PTS[id].nome;
       andando = null; // before the last frame: Google's window view only draws/loads when not walking (Victor 08/10: the city only loaded after moving the camera)
       montaHot(); desenha();
+      if (para.refinar) repinta(); // R2: the 12-bit low bits landed during the walk
     })();
     return andando;
   }
@@ -315,18 +322,24 @@ async function criar({ container, manifesto = 'assets/render/tour360/manifesto.j
           { const t = Math.min(1, Math.max(0, (el + 2) / 10)); mat.uniforms.kDiaV.value = cv && cv.sem_reflexo ? 1 : t * t * (3 - 2 * t); } // 12/10: panorama rendered without the baked reflection -> real glass: interior x (1 - R) + R x city, day and night
           if (cv && cv.arq) { if (!this.vidros) this.vidros = new Map(); // own loader: the layer LRU of render-mix may dispose textures
             if (!this.vidros.has(cv.arq)) this.vidros.set(cv.arq, new Promise((ok) => new THREE.TextureLoader().load(e.mix.base + cv.arq, (t) => { t.colorSpace = THREE.NoColorSpace; t.generateMipmaps = false; t.minFilter = t.magFilter = THREE.LinearFilter; ok(t); }, undefined, () => ok(null))));
-            this.vidros.get(cv.arq).then((tx) => { if (!tx || atual !== id) return; mat.uniforms.tV.value = tx; mat.uniforms.usaVidro.value = estado.reflexo === false ? 0 : 1; this.vidro = true; botaoReflexo(); vista.acordar(); desenha(); }); }
+            this.vidros.get(cv.arq).then((tx) => { if (!tx || atual !== id) return; mat.uniforms.tV.value = tx; vista.definirVidro(tx.image); mat.uniforms.usaVidro.value = estado.reflexo === false ? 0 : 1; this.vidro = true; botaoReflexo(); vista.acordar(); desenha(); }); }
+          // R3a 13/10: balcony box of this point (manifest vidro.caixa = [back, floor, left, front, ceiling, right] m around the eye)
+          mat.uniforms.usaCaixa.value = cv && Array.isArray(cv.caixa) ? 1 : 0;
+          if (cv && Array.isArray(cv.caixa)) { mat.uniforms.caixaMin.value.set(cv.caixa[0], cv.caixa[1], cv.caixa[2]); mat.uniforms.caixaMax.value.set(cv.caixa[3], cv.caixa[4], cv.caixa[5]); }
           atual = id;
         },
         antes() {
           if (gm.MODO_FOTO) return this.antesFoto();
           let mostrar = !andando && !falhou && atual === estado.ponto && this.ativoEm(estado.ponto);
           // no window on screen (looking at a wall): no city to draw and nothing to download
-          let janela = null;
+          let janela = null, vidroTela = null;
           if (mostrar) {
             camera.updateMatrixWorld(true); janela = vista.janelaNaTela(camera);
-            mat.uniforms.espelho.value = 0;
-            if (!janela && this.vidro) janela = { x0: -1, y0: -1, x1: 1, y1: 1, espelho: true }; // looking into the flat from the balcony: the glass reflects the city
+            mat.uniforms.espelho.value = 0; mat.uniforms.temJanela.value = 1;
+            // R3b 13/10 (Victor: the reflection vanished at some angles with the glass still on screen): the mirror is drawn
+            // whenever the GLASS is on screen; with the window on screen too, both views are drawn (tG + tGV)
+            vidroTela = this.vidro && mat.uniforms.usaVidro.value > 0.5 ? vista.vidroNaTela(camera) : null;
+            if (!janela && vidroTela) janela = { x0: -1, y0: -1, x1: 1, y1: 1, espelho: true }; // looking into the flat from the balcony: the glass reflects the city
             if (!janela) {
               // looking at the room, not the window: keep downloading the window view (yaw 0 of this point), nothing drawn
               mostrar = false; malha.visible = false; vista.credito.hidden = true;
@@ -346,8 +359,11 @@ async function criar({ container, manifesto = 'assets/render/tour360/manifesto.j
             vista.tamanho(tam.x, tam.y, k);
             camera.updateMatrixWorld(true); camera.getWorldDirection(dir);
             malha.position.copy(camera.position);
-            if (janela.espelho) { dir.x = -dir.x; mat.uniforms.espelho.value = 1; } // mirrored across the facade (forward = -x flips); the shader flips the image back
-            vista.desenha(dir, camera.fov, camera.aspect, janela);
+            let dirV = null;
+            if (janela.espelho) { dir.x = -dir.x; mat.uniforms.espelho.value = 1; mat.uniforms.temJanela.value = 0; } // mirrored across the facade (forward = -x flips); the shader flips the image back
+            else if (vidroTela) { dirV = dir.clone(); dirV.x = -dirV.x; mat.uniforms.espelho.value = 1; } // window AND glass on screen
+            vista.desenha(dir, camera.fov, camera.aspect, janela, false, dirV);
+            mat.uniforms.tGV.value = dirV && vista.rtV ? vista.rtV.texture : vista.rt.texture;
             vista.progresso(true);
             const op = vista.opacidade(); mat.uniforms.forca.value = op; if (op < 1) vista.acordar(); // keep frames coming during the fade
             vista.credito.hidden = op <= 0; // the credit shows only while Google's city is on screen
@@ -366,7 +382,7 @@ async function criar({ container, manifesto = 'assets/render/tour360/manifesto.j
             vista.passoFoto();
             camera.updateMatrixWorld(true); const janela = vista.janelaNaTela(camera);
             const ve = (!!janela || this.vidro) && !andando; // the balcony glass reflects the picture too
-            malha.visible = ve && vista.pronto; malha.position.copy(camera.position); mat.uniforms.espelho.value = 0;
+            malha.visible = ve && vista.pronto; malha.position.copy(camera.position); mat.uniforms.espelho.value = 0; mat.uniforms.temJanela.value = 1;
             mat.uniforms.usaCubo.value = 1; { const F = vista.foto, U = mat.uniforms; U.nF.value = F.alvos.length; U.nOk.value = F.feito ? F.alvos.length : F.i;
               F.alvos.forEach((a, k) => { U['fA' + k].value = a.A.texture; U['fW' + k].value = a.W.texture; U.fM.value[k].copy(F.mats[k]); }); }
             { const L = gm.luzDaCidade(this.el); mat.uniforms.luzBase.value.set(...L.base); mat.uniforms.luzesN.value = L.luzes; } // hour of the day on the picture

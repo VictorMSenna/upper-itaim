@@ -86,6 +86,12 @@ uniform float sLoc;
 uniform float lG;
 uniform sampler2D tFora;
 uniform float usaFora;
+uniform float pufeGanho;
+uniform vec3 pufeAlb;
+uniform float pufeAmb;
+uniform vec3 corLuz;
+uniform float ambSala;
+uniform float pufeNoite;
 uniform float fatorFora;
 uniform float srgb;
 // v4 gradual sun: per-pixel first/last lit half-minute (t_in, t_out) packed in RGB as 12+12 bits
@@ -154,7 +160,18 @@ void main(){
     s += gDir * alb * max(dot(n, solDir), 0.0) * visSol(vUv);
   }
   vec3 x = s * wb * expo;
-  float fo = usaFora > 0.5 ? texture2D(tFora, vUv).r : 0.0;
+  vec2 foP = usaFora > 0.5 ? texture2D(tFora, vUv).rg : vec2(0.0);
+  float fo = foP.x;
+  // 13/10 Victor (R4: "o pufe e um bloco preto, nao da para distinguir a forma"): the pouf pixels (fora.webp GREEN) are given
+  // a lighter navy velvet: its own rendered shading (desaturated, x pufeGanho) + the room's ambient light (mean room
+  // luminance ambSala, colour corLuz; the blurred local map was ruled by the black night window) x the lighter albedo pufeAlb
+  if (foP.y > 0.0 && modoLum < 0.5) {
+    float lp = dot(x, vec3(0.2126, 0.7152, 0.0722));
+    vec3 sh = mix(vec3(lp), x, 0.5) * pufeGanho; // its own shading, as if the albedo were ~pufeGanho x lighter (less violet)
+    sh /= 1.0 + dot(sh, vec3(0.2126, 0.7152, 0.0722)) / 0.12; // soft cap: the lit lower front seen from the balcony went white
+    vec3 xp = sh + pufeAlb * corLuz * ambSala * expo * pufeAmb * pufeNoite;
+    x = mix(x, xp, foP.y);
+  }
   if (modoLum > 0.5) { float l0 = max(dot(x, vec3(0.2126, 0.7152, 0.0722)), 1e-6); float v = clamp((log2(l0) + 16.0) / 20.0, 0.0, 1.0) * 255.0; gl_FragColor = vec4(floor(v) / 255.0, 1.0 - fo, fract(v), 1.0); return; } // 08/10: 16 bits (R hi + B lo) - 8 bits made rings on smooth walls
   if (usaFora > 0.5) x *= mix(1.0, fatorFora, fo); // v4: window exposed on its own
   if (sLoc > 0.0) { vec4 q = texture2D(tLoc, vUv); float r = exp2(clamp((lG - ((q.r + q.b / 255.0) * 20.0 - 16.0)) * sLoc, -1.5, 1.5)); x *= mix(1.0, r, smoothstep(0.05, 0.3, q.g) * (1.0 - fo)); }
@@ -240,7 +257,8 @@ export class MisturaPonto {
       vertexShader: VERT, fragmentShader: FRAG, depthTest: false, depthWrite: false,
       uniforms: { t: { value: Array(7).fill(PRETO) }, g: { value: Array.from({ length: 7 }, () => new THREE.Vector3()) },
         esc: { value: Array(7).fill(1) }, gama: { value: 2.2 }, ombro: { value: +(new URLSearchParams(location.search).get('ombro')) || 1.1 }, joelho: { value: Array(7).fill(0) }, joelho2: { value: Array(7).fill(0.95) }, gamaL: { value: Array(7).fill(2.2) }, y2: { value: Array(7).fill(2) }, ymax: { value: Array(7).fill(4) }, wb: { value: new THREE.Vector3(1, 1, 1) }, expo: { value: 1 }, srgb: { value: half ? 0 : 1 },
-        tFora: { value: PRETO }, usaFora: { value: 0 }, fatorFora: { value: 1 }, modoLum: { value: 0 }, tLoc: { value: PRETO }, sLoc: { value: 0 }, lG: { value: 0 }, dbR: { value: 14 / w }, loIdx: { value: Array(7).fill(-1) }, tL0: { value: PRETO }, tL1: { value: PRETO }, tL2: { value: PRETO }, dbT: { value: (new URLSearchParams(location.search).get('deband') === '0' ? 0 : 3) / 255 },
+        tFora: { value: PRETO }, usaFora: { value: 0 }, pufeGanho: { value: +(new URLSearchParams(location.search).get('pufe')) || 8 }, pufeAmb: { value: Number.isFinite(parseFloat(new URLSearchParams(location.search).get('pufeA'))) ? parseFloat(new URLSearchParams(location.search).get('pufeA')) : 1.5 },
+        pufeAlb: { value: new THREE.Vector3(0.027, 0.031, 0.051) }, corLuz: { value: new THREE.Vector3(1, 1, 1) }, ambSala: { value: 0 }, pufeNoite: { value: 1 }, /* pufeAlb = sRGB (46, 50, 64) linear */ fatorFora: { value: 1 }, modoLum: { value: 0 }, tLoc: { value: PRETO }, sLoc: { value: 0 }, lG: { value: 0 }, dbR: { value: 14 / w }, loIdx: { value: Array(7).fill(-1) }, tL0: { value: PRETO }, tL1: { value: PRETO }, tL2: { value: PRETO }, dbT: { value: (new URLSearchParams(location.search).get('deband') === '0' ? 0 : 3) / 255 },
         tAlb: { value: PRETO }, tNor: { value: PRETO }, tVis: { value: PRETO }, tVis2: { value: PRETO }, nInt: { value: 0 }, usaVis: { value: 0 }, gDir: { value: new THREE.Vector3() },
         solDir: { value: new THREE.Vector3(0, 0, 1) }, meioMin: { value: 0 }, visTam: { value: new THREE.Vector2(1, 1) }, raioVis: { value: Number.isFinite(parseFloat(new URLSearchParams(location.search).get('visr'))) ? parseFloat(new URLSearchParams(location.search).get('visr')) : (capacidade().nivel === 'topo' ? 2 : 1) }, pesoN: { value: new URLSearchParams(location.search).get('visn') === '0' ? 0 : 1 } }, // ?visr=0 = old look, ?visn=0 = no normal weight (tests)
     });
@@ -353,6 +371,10 @@ void main(){
       const M = this.p.enu_para_normal || this.manifestoMat || [1, 0, 0, 0, 1, 0, 0, 0, 1];
       U.solDir.value.set(M[0] * enu[0] + M[1] * enu[1] + M[2] * enu[2], M[3] * enu[0] + M[4] * enu[1] + M[5] * enu[2], M[6] * enu[0] + M[7] * enu[1] + M[8] * enu[2]).normalize();
     }
+    // 13/10: unused sampler slots kept textures that the LRU / soltarCamadas had disposed; three re-uploaded them from the
+    // dropped CPU image ('texSubImage2D: Overload resolution failed' on every repaint). Empty slots now hold PRETO.
+    U.tL0.value = U.tL1.value = U.tL2.value = PRETO;
+    if (!U.usaVis.value) U.tAlb.value = U.tNor.value = U.tVis.value = U.tVis2.value = PRETO;
     for (let i = 0; i < 7; i++) {
       const it = pl.lista[i];
       U.t.value[i] = (it && tx[i]) || PRETO;
@@ -370,20 +392,30 @@ void main(){
     // switch at 2 deg. Daylight: partial grey-world balance; night: keep most of the warm cast of the lamps (a photo
     // would too), otherwise saturated lamp shades turn blue after the balance
     const tDia = Math.min(1, Math.max(0, (el + 2) / 10)), kDia = tDia * tDia * (3 - 2 * tDia);
-    const balanco = (WB, noite) => {
-      const w = m.map((x) => (y > 0 ? (y / Math.max(x, 1e-9)) ** WB : 1));
+    const balanco = (mm, WB, noite) => {
+      const yb = lum(mm);
+      const w = mm.map((x) => (yb > 0 ? (yb / Math.max(x, 1e-9)) ** WB : 1));
       if (noite) { // (B1) warm but not orange: balanced R/B at most 1.25, green in between (never a green cast)
-        const c = [m[0] * w[0], m[1] * w[1], m[2] * w[2]];
+        const c = [mm[0] * w[0], mm[1] * w[1], mm[2] * w[2]];
         const rb = c[0] / Math.max(c[2], 1e-9);
         if (rb > 1.25) { const k = Math.sqrt(rb / 1.25); w[0] /= k; w[2] *= k; c[0] /= k; c[2] *= k; }
         const alvoG = Math.sqrt(c[0] * c[2]); if (c[1] > 0) w[1] *= alvoG / c[1];
-        const yy = 0.2126 * m[0] * w[0] + 0.7152 * m[1] * w[1] + 0.0722 * m[2] * w[2]; // keep the luminance
-        if (yy > 0) { const n = y / yy; for (let i = 0; i < 3; i++) w[i] *= n; }
+        const yy = 0.2126 * mm[0] * w[0] + 0.7152 * mm[1] * w[1] + 0.0722 * mm[2] * w[2]; // keep the luminance
+        if (yy > 0) { const n = yb / yy; for (let i = 0; i < 3; i++) w[i] *= n; }
       }
       return w;
     };
-    const wN = balanco(0.15, true), wD = balanco(0.6, false);
+    // 13/10 Victor (R1): the balance came from the mean of the lamps that are ON, so switching the white kitchen light
+    // off re-balanced the scene on the amber spots alone and turned spots + abajur white. Now the camera balance never
+    // depends on which lamps are on: night = a FIXED balance taken on the white kitchen light (the look Victor chose,
+    // 'kitchen ON'), day = grey world on daylight only; one balance for every layer, so each lamp keeps its own colour.
+    const mLuz = this.refLuz || (C.cozinha && (C.cozinha.media_dentro || C.cozinha.media)) || null;
+    let mDiaW = pl.mDia;
+    if (!mDiaW) { mDiaW = [0, 0, 0]; for (const it of pl.lista) if (!it.luz) for (let i = 0; i < 3; i++) mDiaW[i] += it.g[i] * it.c.media[i]; if (pl.dir && pl.dir.media) for (let i = 0; i < 3; i++) mDiaW[i] += pl.dir.g[i] * pl.dir.media[i]; }
+    const wN = mLuz ? balanco(mLuz, 0.15, true) : balanco(m, 0.15, true);
+    const wD = lum(mDiaW) > 0 ? balanco(mDiaW, 0.6, false) : balanco(m, 0.6, false);
     U.wb.value.set(...wN.map((x, i) => x + (wD[i] - x) * kDia));
+    { const c = m.map((x, i) => x * U.wb.value.getComponent(i)), yc = lum(c); if (yc > 0) U.corLuz.value.set(c[0] / yc, c[1] / yc, c[2] / yc); } // R4: colour of the room light
     // exposure: night rule unchanged (gain capped at 4.5); day rule adapts only partially to a dim sky, so the room
     // brightens with the dawn instead of being normalised to full brightness as soon as there is any daylight
     const yDia = C.ceu ? (0.2126 * C.ceu.media[0] + 0.7152 * C.ceu.media[1] + 0.0722 * C.ceu.media[2]) * dhiLux(15) / LUX_W : 0;
@@ -398,6 +430,7 @@ void main(){
     const tFora = C.fora ? await this.textura(C.fora.arq) : null;
     if (tFora) this.emUso.add(C.fora.arq);
     U.usaFora.value = tFora ? 1 : 0;
+    if (!tFora) U.tFora.value = PRETO;
     if (tFora) {
       U.tFora.value = tFora;
       const yF = pl.mFora ? lum(pl.mFora) : 0;
@@ -409,6 +442,7 @@ void main(){
     // enter as tiny numbers (abajur escala 0.004 x pow(v, 2.2) < 1e-4) that round in steps. The exposure is folded into
     // each layer's scale BEFORE the sum, so every term is near 1 in the shader (same image, no underflow).
     const K = U.expo.value;
+    { const c = m.map((x, i) => x * U.wb.value.getComponent(i)); U.ambSala.value = lum(c) * K; const NN = +(new URLSearchParams(location.search).get('pufeN')) || 1.6; U.pufeNoite.value = NN + (1 - NN) * kDia; } // R4: mean room luminance after exposure; night lift x2.2 (amber lamps on navy = black)
     for (let i = 0; i < 7; i++) U.esc.value[i] *= K;
     U.gDir.value.multiplyScalar(K); U.expo.value = 1;
     // local adaptation: day strength 0.5, night 0.2 (keeps the mood of the lamps); ?sloc= tests, ?sloc=0 = off
