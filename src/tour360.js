@@ -312,7 +312,7 @@ async function criar({ container, manifesto = 'assets/render/tour360/manifesto.j
           this.el = el; // night (sun below -2 deg): the window shows our render's night city, not Google's day photos
           // 08/10 glass reflection (varanda looking in): mask of this point's facade glass, if it has one
           const cv = PTS[id].camadas && PTS[id].camadas.vidro; mat.uniforms.usaVidro.value = 0; this.vidro = false; botaoReflexo();
-          { const t = Math.min(1, Math.max(0, (el + 2) / 10)); mat.uniforms.kDiaV.value = t * t * (3 - 2 * t); }
+          { const t = Math.min(1, Math.max(0, (el + 2) / 10)); mat.uniforms.kDiaV.value = cv && cv.sem_reflexo ? 1 : t * t * (3 - 2 * t); } // 12/10: panorama rendered without the baked reflection -> real glass: interior x (1 - R) + R x city, day and night
           if (cv && cv.arq) { if (!this.vidros) this.vidros = new Map(); // own loader: the layer LRU of render-mix may dispose textures
             if (!this.vidros.has(cv.arq)) this.vidros.set(cv.arq, new Promise((ok) => new THREE.TextureLoader().load(e.mix.base + cv.arq, (t) => { t.colorSpace = THREE.NoColorSpace; t.generateMipmaps = false; t.minFilter = t.magFilter = THREE.LinearFilter; ok(t); }, undefined, () => ok(null))));
             this.vidros.get(cv.arq).then((tx) => { if (!tx || atual !== id) return; mat.uniforms.tV.value = tx; mat.uniforms.usaVidro.value = estado.reflexo === false ? 0 : 1; this.vidro = true; botaoReflexo(); vista.acordar(); desenha(); }); }

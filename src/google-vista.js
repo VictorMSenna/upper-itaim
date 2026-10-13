@@ -640,8 +640,10 @@ void main(){
       else if (espelho > 0.5) g = texture2D(tG, vec2(res.x - gl_FragCoord.x, gl_FragCoord.y) / res);
       else ok = false;
       vec2 uvR = vec2(fract(0.5 - vUv.x), vUv.y); // the mirrored direction (forward flips) in the panorama's own uv
-      float mR = texture2D(tM, uvR).r;
-      vec3 pR = texture2D(tPano, uvR).rgb; if (panoSrgb > 0.5) pR = pow(pR, vec3(2.2));
+      // 12/10: the pano's own sky (hidden behind Google) holds HDR fireflies; a 1-2% leak of them through a filtered mask
+      // edge sparkled as white dots in the glass -> snap the mask and cap the pano
+      float mR = smoothstep(0.1, 0.9, texture2D(tM, uvR).r);
+      vec3 pR = texture2D(tPano, uvR).rgb; if (panoSrgb > 0.5) pR = pow(pR, vec3(2.2)); pR = min(pR, vec3(1.0));
       if (!ok) { g = vec4(0.0); ok = true; mR = 0.0; } // no picture of the city here yet: the balcony still reflects
       if (ok) {
         float w = v.r * (0.25 + 0.75 * v.g) * forcaV * forca;
