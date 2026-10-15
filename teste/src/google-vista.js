@@ -18,7 +18,18 @@ import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 const V = '3d-tiles-renderer@0.5.3'; // pinned
 const CDN = `https://cdn.jsdelivr.net/npm/${V}/build/`;
 const DRACO = 'https://cdn.jsdelivr.net/npm/three@0.186.1/examples/jsm/libs/draco/gltf/';
-const LOGO = 'https://maps.gstatic.com/mapfiles/api-3/images/google_white5_hdpi.png';
+// 15/10 (Google terms, G1-TERMOS A4): the official "Google Maps" logo (Google_Maps_Attribution_Assets.zip, outlined version for a
+// busy background, unmodified) replaces the old "Google" logo; shown 21 px tall = the logo itself ~17 px (min 16, max 19 dp)
+// plus its outline; accessibility label "Google Maps"; clear space 10/10/10/5 px; data attribution in full (no ellipsis),
+// as the plugin aggregates it (sorted by occurrences, ';'), after "Dados do mapa:"; and a line that says WHICH part of the
+// scene is Google's (hybrid-scene rule). The grey-zone uses (window photo, reflection, night grade, tower cut) are unchanged.
+const LOGO = 'assets/marca/google-maps-logo-contorno-escuro.svg';
+const CRED_CSS = 'display:flex;flex-direction:column;align-items:flex-start;gap:3px;padding:10px 10px 5px;border-radius:8px;background:rgba(0,0,0,.5);color:#fff;font:10px/1.25 system-ui,sans-serif;pointer-events:none;white-space:normal;overflow:visible';
+export function htmlCredito(parte) {
+  return '<img alt="Google Maps" aria-label="Google Maps" src="' + LOGO + '" style="height:21px;width:auto;display:block;flex:none" referrerpolicy="no-referrer">'
+    + '<span class="g3d-parte" style="font-weight:600">' + parte + '</span><span class="g3d-attr" style="opacity:.9"></span>';
+}
+export const textoDados = (out) => { const t = out.filter((a) => a.type === 'string' && a.value).map((a) => a.value).join('; '); return t ? 'Dados do mapa: ' + t : ''; };
 
 // detail level: ?gerr=<px> sets the 360 target, the outside view uses 1.25x
 // detail per device tier (src/capacidade.js): 8 px = Google's finest on computers and top phones, 24/28 on mid phones
@@ -574,7 +585,7 @@ export class VistaGoogle {
   montaCredito() {
     const d = document.createElement('div');
     d.className = 't360-g3d';
-    d.innerHTML = '<img alt="Google" src="' + LOGO + '" height="12" referrerpolicy="no-referrer"><span class="g3d-attr"></span>';
+    d.innerHTML = htmlCredito('Cidade vista da janela e reflexo no vidro: Google Maps · apartamento: imagem ilustrativa própria');
     // discreet progress, a separate element (tour360 places it on the left, the credit sits small on the right)
     this.carga = document.createElement('div'); this.carga.className = 't360-g3d-carga'; this.carga.hidden = true;
     this.carga.innerHTML = '<span>Montando a vista real da cidade</span><i><b></b></i>';
@@ -582,7 +593,7 @@ export class VistaGoogle {
   }
   atualizaCredito() {
     const out = []; this.s.tiles.getAttributions(out);
-    const txt = out.filter((a) => a.type === 'string' && a.value).map((a) => a.value).join(' · ');
+    const txt = textoDados(out);
     const el = this.credito.querySelector('.g3d-attr');
     if (el && el.textContent !== txt) el.textContent = txt;
   }
@@ -780,8 +791,8 @@ export async function ligarGoogleCena({ scene, camera, renderer, ref, aoMudar, e
   let falhou = false, mostrando = false;
   const cred = document.createElement('div'); cred.className = 'g3d-cena'; // not t360-g3d: the 360's CSS (bottom:78px) stretched it
   // compact credit in a corner (Victor 07/10: it took too much space): Google logo + data attribution, one line, top right
-  cred.style.cssText = 'position:absolute;right:8px;top:104px;z-index:5;display:flex;gap:5px;align-items:center;max-width:62%;padding:2px 6px;border-radius:6px;background:rgba(0,0,0,.45);color:#fff;font:9px/1.2 system-ui,sans-serif;pointer-events:none;white-space:nowrap;overflow:hidden';
-  cred.innerHTML = '<img alt="Google" src="' + LOGO + '" height="11" style="display:block;flex:none"><span class="g3d-attr" style="opacity:.85;overflow:hidden;text-overflow:ellipsis"></span>';
+  cred.style.cssText = 'position:absolute;right:8px;top:104px;z-index:5;max-width:min(58%,260px);' + CRED_CSS;
+  cred.innerHTML = htmlCredito('Cidade 3D ao redor: Google Maps · o prédio em destaque: maquete própria');
   cred.hidden = true; // only while Google's city is on screen
   renderer.domElement.parentElement.appendChild(cred);
   // our city stays until Google's first view is complete; meanwhile a discreet bar (top left, under the buttons)
@@ -829,7 +840,7 @@ export async function ligarGoogleCena({ scene, camera, renderer, ref, aoMudar, e
         camSelFora.updateProjectionMatrix(); camSelFora.updateMatrixWorld(true);
         tiles.setResolution(camSelFora, tam.x, Math.round(tam.y * fr)); tiles.update();
         out.length = 0; tiles.getAttributions(out);
-        const txt = out.filter((a) => a.type === 'string' && a.value).map((a) => a.value).join(' · ');
+        const txt = textoDados(out);
         const el = cred.querySelector('.g3d-attr'); if (el.textContent !== txt) el.textContent = txt;
         const st = tiles.stats, pend = st.queued + st.downloading + st.parsing;
         if (!mostrando) {

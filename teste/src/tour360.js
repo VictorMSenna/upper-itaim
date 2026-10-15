@@ -26,7 +26,7 @@ const CURTO_LUZ = { teto: 'Spots', abajur: 'Abajur', cortineiro: 'LED', cozinha:
 const paraMundo = ([u, v, h]) => new THREE.Vector3(-v, h, u);
 
 async function criar({ container, manifesto = 'assets/render/tour360/manifesto.json', ponto, estacao = 'inverno', minutos = 900,
-  luzes = {}, aoFechar, teste = false, andar = null, final = null }) {
+  luzes = {}, aoFechar, teste = false, andar = null, final = null, numero = null }) {
   const man = typeof manifesto === 'string' ? await (await fetch(manifesto)).json() : manifesto;
   const base = typeof manifesto === 'string' ? manifesto.replace(/[^/]*$/, '') : (man.base || '');
   const PTS = Object.fromEntries(man.pontos.map((p) => [p.id, p]));
@@ -47,7 +47,8 @@ async function criar({ container, manifesto = 'assets/render/tour360/manifesto.j
     <div class="t360-nome"></div>
     <div class="t360-luzes">${LUZES.filter((k) => man.pontos.some((p) => p.camadas && p.camadas[k])).map((k) => `<button data-luz="${k}" aria-pressed="false" title="${NOMES_LUZ[k]}"><span class="l-longo">${NOMES_LUZ[k]}</span><span class="l-curto">${CURTO_LUZ[k]}</span></button>`).join('')}</div>
     <button class="t360-fechar" aria-label="Fechar">×</button>
-    <div class="t360-chips"></div>`;
+    <div class="t360-chips"></div>
+    <div class="t360-aviso-sol" hidden>Esta sacada tem sol direto agora; o passeio foi feito num studio de outra face e não mostra esse sol (veja o cartão).</div>`;
   // 08/10 Victor: the city reflected in the balcony glass is nice but sometimes in the way -> on/off, only where there is glass
   const bR = document.createElement('button'); bR.className = 't360-reflexo'; bR.hidden = true; bR.setAttribute('aria-pressed', 'true');
   bR.innerHTML = '<span class="l-longo">Reflexo no vidro</span><span class="l-curto">Reflexo</span>';
@@ -74,6 +75,8 @@ async function criar({ container, manifesto = 'assets/render/tour360/manifesto.j
     .t360-chips{position:absolute;inset:0;pointer-events:none;z-index:4}
     .t360-chip{position:absolute;transform:translate(-50%,-100%);pointer-events:auto;display:inline-flex;align-items:center;gap:6px;min-height:36px;padding:0 13px;border-radius:999px;border:1px solid rgba(255,255,255,.65);background:rgba(16,18,17,.8);color:#fff;font:600 12.5px/1 system-ui,sans-serif;white-space:nowrap;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.35)}
     .t360-chip i{font-style:normal;font-size:14px;opacity:.85}
+    .t360-aviso-sol{position:absolute;left:50%;top:104px;transform:translateX(-50%);width:max-content;max-width:min(86%,420px);padding:6px 10px;border-radius:10px;background:rgba(16,18,17,.78);color:#f4d48a;font:11.5px/1.3 system-ui,sans-serif;text-align:center;pointer-events:none;z-index:4}
+    .t360-aviso-sol[hidden]{display:none}
     .t360-fechar{position:absolute;right:12px;top:12px;width:36px;height:36px;border-radius:50%;border:0;background:rgba(0,0,0,.55);color:#fff;font-size:22px;cursor:pointer}`;
     document.head.appendChild(css);
   }
@@ -101,7 +104,7 @@ async function criar({ container, manifesto = 'assets/render/tour360/manifesto.j
     const geo = new THREE.SphereGeometry(RAIO, 96, 48); geo.scale(-1, 1, 1);
     const mat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 1, depthWrite: false, toneMapped: false });
     const m = new THREE.Mesh(geo, mat); m.position.copy(paraMundo(p.pos)); m.visible = false; cena.add(m);
-    const mix = new MisturaPonto(renderer, p, base, { larguraMax, SOL });
+    const mix = new MisturaPonto(renderer, p, base, { larguraMax, SOL, unidade: final != null && numero != null ? { numero: String(numero), andar, final } : null, finalRender: man.final ?? null }); // S2: sun of THIS unit
     // 12-bit lamp low bits arrived (render-mix.js). 13/10 Victor (R2, rings at night in the kitchen): when they landed
     // during the walk to this point (estado.ponto still the old one; cached files land in < 600 ms) the repaint was
     // skipped and the 8-bit picture stayed until the next sun move. Now the point remembers it and repaints on arrival.
@@ -299,10 +302,12 @@ async function criar({ container, manifesto = 'assets/render/tour360/manifesto.j
   async function repinta() {
     if (pintando) { pendente = true; return pintando; }
     pintando = (async () => {
-      do { pendente = false; const e = await pinta(estado.ponto); e.m.visible = true; desenha(); } while (pendente);
+      do { pendente = false; const e = await pinta(estado.ponto); e.m.visible = true; avisoSol(e); desenha(); } while (pendente);
     })().finally(() => { pintando = null; });
     return pintando;
   }
+  // S2 (15/10): another facade than the render's and the card says the balcony has sun now -> say so instead of faking it
+  function avisoSol(e) { const a = raiz.querySelector('.t360-aviso-sol'); if (a) a.hidden = !(e.mix.outraFace() && e.mix.cvAgora(estado.estacao, estado.minutos) > 0.5); }
   function marcaLuzes() { raiz.querySelectorAll('[data-luz]').forEach((b) => b.setAttribute('aria-pressed', String(!!estado.luzes[b.dataset.luz]))); }
   raiz.querySelectorAll('[data-luz]').forEach((b) => b.addEventListener('click', () => { estado.luzes[b.dataset.luz] = !estado.luzes[b.dataset.luz]; marcaLuzes(); repinta(); }));
   let fechado = false;
@@ -357,7 +362,7 @@ async function criar({ container, manifesto = 'assets/render/tour360/manifesto.j
       const geo = new THREE.SphereGeometry(RAIO, 96, 48); geo.scale(-1, 1, 1);
       const malha = new THREE.Mesh(geo, mat); malha.renderOrder = 3; malha.visible = false; malha.frustumCulled = false; cena.add(malha);
       const st = document.createElement('style'); st.id = 't360-g3d-css';
-      st.textContent = '.t360-g3d{position:absolute;right:10px;bottom:78px;max-width:58%;display:flex;align-items:center;gap:5px;padding:2px 6px;border-radius:6px;background:rgba(0,0,0,.45);color:#fff;font:9px/1.2 system-ui,sans-serif;pointer-events:none;white-space:nowrap;overflow:hidden}.t360-g3d[hidden]{display:none}.t360-g3d img{height:11px;width:auto;display:block;flex:none}.t360-g3d .g3d-attr{opacity:.85;overflow:hidden;text-overflow:ellipsis}.t360-g3d-carga{position:absolute;left:12px;bottom:78px;width:160px;display:flex;flex-direction:column;gap:3px;padding:4px 8px;border-radius:7px;background:rgba(0,0,0,.45);color:#fff;font:10px/1.2 system-ui,sans-serif;pointer-events:none}.t360-g3d-carga[hidden]{display:none}.t360-g3d-carga i{display:block;height:2px;border-radius:2px;background:rgba(255,255,255,.25);overflow:hidden}.t360-g3d-carga b{display:block;height:100%;width:4%;background:#fff;transition:width .4s ease}';
+      st.textContent = '.t360-g3d{position:absolute;right:10px;bottom:78px;max-width:min(58%,300px);display:flex;flex-direction:column;align-items:flex-start;gap:3px;padding:10px 10px 5px;border-radius:8px;background:rgba(0,0,0,.5);color:#fff;font:10px/1.25 system-ui,sans-serif;pointer-events:none;white-space:normal;overflow:visible}.t360-g3d[hidden]{display:none}.t360-g3d img{height:21px;width:auto;display:block;flex:none}.t360-g3d-carga{position:absolute;left:12px;bottom:78px;width:160px;display:flex;flex-direction:column;gap:3px;padding:4px 8px;border-radius:7px;background:rgba(0,0,0,.45);color:#fff;font:10px/1.2 system-ui,sans-serif;pointer-events:none}.t360-g3d-carga[hidden]{display:none}.t360-g3d-carga i{display:block;height:2px;border-radius:2px;background:rgba(255,255,255,.25);overflow:hidden}.t360-g3d-carga b{display:block;height:100%;width:4%;background:#fff;transition:width .4s ease}';
       document.head.appendChild(st); raiz.appendChild(vista.credito); raiz.appendChild(vista.carga);
       const dir = new THREE.Vector3(), tam = new THREE.Vector2(), perf = { n: 0, ms: 0, max: 0 }, camV = new THREE.PerspectiveCamera();
       let atual = null, falhou = false;

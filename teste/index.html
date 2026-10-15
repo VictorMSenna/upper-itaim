@@ -372,6 +372,8 @@ body.painel-aberto .chip-lista, body.vista-foto .chip-lista { display: none; }
 .legal dl { display: grid; grid-template-columns: minmax(0, 10em) minmax(0, 1fr); gap: 7px 12px; font-size: 13.5px; margin: 12px 0; }
 .legal dt { color: var(--texto-2); } .legal dd { margin: 0; }
 .legal p { font-size: 13px; color: var(--texto-2); }
+.legal .legal-termos { font: 600 11px var(--f-mono); letter-spacing: .1em; text-transform: uppercase; color: var(--texto); margin: 16px 0 0; } /* 15/10 Google ToS §3.2.2(a) */
+.legal a { color: var(--texto); text-underline-offset: 2px; }
 
 /* tour (photos of the furnished studio) */
 .tour { position: fixed; inset: 0; z-index: 90; background: var(--base); overflow: auto; overscroll-behavior: contain; }
@@ -542,7 +544,7 @@ body.revisao .aviso-revisao { display: block !important; }
 
   <p class="linha-legal" id="linha-legal">
     <span class="txt"><span data-cfg="imobiliaria"></span><span class="seg" data-seg="creciJ"> · CRECI-J <span data-cfg="creciJ"></span></span> · <span data-cfg="tabelaCurta"></span><span class="lg-extra"> · simulação ilustrativa<span id="atrib-curta" hidden> · entorno: GeoSampa/PMSP (CC BY-SA 4.0)</span></span></span>
-    <button type="button" id="btn-legal-2" aria-controls="legal">Informações legais</button>
+    <button type="button" id="btn-legal-2" aria-controls="legal">Termos e informações</button>
   </p>
 </main>
 
@@ -671,6 +673,8 @@ body.revisao .aviso-revisao { display: block !important; }
     <p>Maquete 3D: simulação ilustrativa, volumes e cores fora de escala exata. Simulação do sol: pode variar com obstáculos não mapeados. Prédios vizinhos no cálculo do sol: © colaboradores do OpenStreetMap (ODbL).</p>
     <p id="legal-entorno" hidden></p>
     <p>Versão de teste: número de andares e posição das fileiras a conferir com o corretor.</p>
+    <h3 id="termos" class="legal-termos">Termos de uso</h3>
+    <p>Este site inclui recursos e conteúdo do Google Maps: a cidade em 3D ao redor do prédio, a vista das janelas e o reflexo no vidro da varanda. O uso dos recursos e do conteúdo do Google Maps está sujeito às versões em vigor dos <a href="https://maps.google.com/help/terms_maps/" target="_blank" rel="noopener">Termos de Serviço Adicionais do Google Maps para Usuários Finais</a> e da <a href="https://policies.google.com/privacy" target="_blank" rel="noopener">Política de Privacidade do Google</a>.</p>
     <p>Privacidade: esta página não coleta seus dados. O botão de WhatsApp abre o aplicativo com a mensagem escrita; nada é enviado sem você confirmar.</p>
   </section>
 </div>

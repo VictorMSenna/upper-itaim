@@ -452,7 +452,7 @@ async function carregarInterior() {
         tour360: true,
         // lamps on by default (same as the 3D interior), so night is never a black room
         abrirInterior: (o) => t.abrirTour360({ container: o.container, manifesto: man, estacao: o.estacao, minutos: o.minutos, aoFechar: o.aoFechar, teste: o.teste,
-          andar: porId.get(o.id)?.andar, final: porId.get(o.id)?.final, // Google city seen from the real unit
+          andar: porId.get(o.id)?.andar, final: porId.get(o.id)?.final, numero: porId.get(o.id)?.numero, // Google city + (S2) sun of the real unit
           luzes: { teto: true, abajur: true, cortineiro: false, cozinha: false } }), // night default: spots + bedside lamps (WB neutralised in render-mix)
         definirHora: t.definirHora, definirEstacao: t.definirEstacao, fecharInterior: t.fecharTour360,
       };
@@ -520,7 +520,7 @@ function preencherBarraInterior(u) {
   // phone (08/10, Victor: no truncated text, only the essentials): line 1 unit + floor, line 2 price; status as a coloured dot
   $('#ib-txt').replaceChildren(el('span', { class: 'ib-l1' }, [el('b', { text: `Unidade ${u.numero}` }), el('span', { class: 'ib-andar', text: ` · ${u.andar}º andar` }),
     el('span', { class: 'ib-sep', text: ' · ' }), el('span', { class: `ib-sit ${u.situacao}`, text: s.rotulo })]),
-    el('span', { class: 'ib-l2' }, [el('span', { class: 'ib-andar-c', text: `${u.andar}º andar · ` }),
+    el('span', { class: 'ib-l2' }, [el('span', { class: 'ib-andar-c', text: `${u.andar}º andar${u.preco_total != null ? ' · ' : ''}` }),
       u.preco_total != null ? el('span', { class: 'mono ib-preco', text: brl(u.preco_total).replace(',00', '') }) : '',
       // 15/10 FILA D3: the phone bar shows the short price (same format as the hover label), never a cut "R$ 1.125.00"
       u.preco_total != null ? el('span', { class: 'mono ib-preco-curto', text: precoCurtoMi(u.preco_total) }) : '']));

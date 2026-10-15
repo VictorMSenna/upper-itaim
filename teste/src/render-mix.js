@@ -250,8 +250,9 @@ const PRETO = new THREE.DataTexture(new Uint8Array([0, 0, 0, 255]), 1, 1); PRETO
 
 // One panorama point: owns its layer textures and a render target with the mixed (linear, tone-mapped) result.
 export class MisturaPonto {
-  constructor(renderer, ponto, base, { larguraMax = 4096, SOL } = {}) {
+  constructor(renderer, ponto, base, { larguraMax = 4096, SOL, unidade = null, finalRender = null } = {}) {
     this.r = renderer; this.p = ponto; this.base = base; this.max = larguraMax; this.SOL = SOL;
+    this.unidade = unidade; this.finalRender = finalRender; // S2 (15/10): unit being shown + final of the rendered unit
     this.cache = new Map();
     const w = Math.min(larguraMax, ponto.largura || 4096);
     const gl = renderer.getContext();
@@ -304,8 +305,41 @@ void main(){
   // (B1) free the layer textures of a point the visitor left (GPU memory); the mixed render target stays
   soltarCamadas() { for (const p of this.cache.values()) p.then((t) => t && t.dispose()); this.cache.clear(); }
   // which layers + gains for a state; also returns the analytic mean (for exposure/white balance)
+  // 15/10 S2 (audit S2-SOL-DENTRO): ONE render (unit 107, balcony to 343.4 deg) is shown for all 117 units. Direct sun
+  // (solvis) and its bounce (solind) are kept only when (1) the unit's balcony faces the same way as the rendered one and
+  // (2) the unit has sun on the balcony at that moment by dados/sol.json `cv` - the SAME source as the unit card - with a
+  // 15-min ramp between frames. Otherwise only the sky and the lamps light the room (no GPU, no new render).
+  fatorSolUnidade(estacao, minutos) {
+    const u = this.unidade, S = this.SOL;
+    if (!u || !S || !S.finais || u.final == null || this.finalRender == null) return 1;
+    const fu = S.finais[String(u.final)], fr = S.finais[String(this.finalRender)];
+    if (!fu || !fr) return 1;
+    const dAng = Math.abs(((fu.sacada_aponta_graus - fr.sacada_aponta_graus + 540) % 360) - 180);
+    if (dAng > 1) return 0; // another facade: this render has no sun for it
+    return this.cvAgora(estacao, minutos);
+  }
+  // sun on THIS unit's balcony at that minute (sol.json cv, same as the card), ramped over the 15-min frames
+  cvAgora(estacao, minutos) {
+    const u = this.unidade, S = this.SOL;
+    if (!u || !S) return 0;
+    const d = S.unidades && S.unidades[u.numero] && S.unidades[u.numero].est && S.unidades[u.numero].est[estacao];
+    const e = S.estacoes && S.estacoes[estacao];
+    if (!d || !e || !d.cv) return 0;
+    const passo = (S.meta && S.meta.passo_min) || 15;
+    const [h, m] = e.inicio.split(':').map(Number);
+    const x = (minutos - (h * 60 + m)) / passo - 0.5, k0 = Math.floor(x), w = x - k0;
+    const v = (k) => (k >= 0 && k < d.cv.length && d.cv[k] === '1' ? 1 : 0);
+    return v(k0) * (1 - w) + v(k0 + 1) * w;
+  }
+  outraFace() {
+    const u = this.unidade, S = this.SOL;
+    if (!u || !S || !S.finais || this.finalRender == null) return false;
+    const fu = S.finais[String(u.final)], fr = S.finais[String(this.finalRender)];
+    return !!(fu && fr && Math.abs(((fu.sacada_aponta_graus - fr.sacada_aponta_graus + 540) % 360) - 180) > 1);
+  }
   plano({ estacao, minutos, luzes }) {
     const s = solNoInstante(this.SOL, estacao, minutos);
+    const fSol = this.fatorSolUnidade(estacao, minutos); // S2
     const C = this.p.camadas;
     const el = Number.isFinite(s.el) ? s.el : -12; // 07/10: true elevation also below the horizon (twilight), not -12 until sunrise
     const cc = corCeu(el), cs = corSol(el);
@@ -314,15 +348,15 @@ void main(){
     // v4 (gradual sun): indirect+glossy sun layers every ~2 h cross-faded, direct diffuse computed per pixel/minute
     const v4 = !!(C.solvis && C.solvis[estacao] && C.albedo && C.normal && C.solind && C.solind[estacao]);
     let dir = null;
-    if (v4) {
+    if (v4 && fSol > 0) {
       const k = this.p.solvis_k || C.solvis_k || 1;
-      const gd = cs.map((x) => (x * dniLux(el) * k) / LUX_W);
+      const gd = cs.map((x) => (x * dniLux(el) * k * fSol) / LUX_W);
       const md = mediaVis((this.p.solvis_media || C.solvis_media || {})[estacao], minutos);
       dir = { vis: C.solvis[estacao], g: gd, media: md, el, az: s.az };
     }
     // sun: hourly layers, cross-faded between the two neighbouring hours (missing hour = no direct sun then)
     const sol = ((v4 ? C.solind : C.sol) && (v4 ? C.solind : C.sol)[estacao]) || {};
-    const gs = dniLux(el) / LUX_W;
+    const gs = (dniLux(el) / LUX_W) * fSol; // S2: no bounce of a sun patch that does not exist for this unit
     // works with hourly or sparser layers (e.g. every 2 h): fade between the nearest rendered hours around `minutos`
     const horas = Object.keys(sol).map((k) => +k.slice(0, 2) * 60 + +k.slice(3, 5)).sort((x, y) => x - y);
     const ant = horas.filter((m) => m <= minutos).pop(), pos = horas.find((m) => m > minutos);
@@ -348,7 +382,7 @@ void main(){
       if (dir && md && mf) { const a = mediaVis(md, minutos), b = mediaVis(mf, minutos); for (let i = 0; i < 3; i++) { mDentro[i] += dir.g[i] * a[i]; mFora[i] += dir.g[i] * b[i]; mDia[i] += dir.g[i] * a[i]; } }
     }
     if (dir && dir.media) for (let i = 0; i < 3; i++) media[i] += dir.g[i] * dir.media[i];
-    return { lista: lista.slice(0, 7), media, mDentro, mFora, mDia, sol: s, dir, minutos };
+    return { lista: lista.slice(0, 7), media, mDentro, mFora, mDia, sol: s, dir, minutos, fSol };
   }
   async atualizar(estado) {
     const pl = this.plano(estado);
