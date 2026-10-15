@@ -160,6 +160,9 @@ export function criarCena({ container, predio, unidades, teste = false,
   scene.add(hemi);
   const sol = new THREE.DirectionalLight(0xfff4e6, LUZ.sol);
   const CENTRO = new THREE.Vector3(CX, 0, CZ);
+  // centre of the drawn sun arc (15/10 D13: a top-of-tower centre was measured and rejected - fewer discs in frame and
+  // misses with the camera high; the ground centre + drawn-elevation lift below passed every sample with sun >= 12 deg)
+  const CENTRO_ARCO = CENTRO;
   sol.position.set(-45, 70, -50);
   sol.target.position.copy(CENTRO);
   sol.castShadow = true;
@@ -260,7 +263,7 @@ export function criarCena({ container, predio, unidades, teste = false,
     }).catch((e) => console.error('B7 entorno', e));
   }
   const b7 = { fachada: false };
-  // B10 (local test, opt-in ?google3d=1 + key injected at runtime): Google Photorealistic 3D Tiles as the city. The tower (PB) stays on
+  // B10 (ON by default since 07/10, ?google3d=0 turns it off; key from src/g3d-chave.js in the published copy): Google Photorealistic 3D Tiles as the city. The tower (PB) stays on
   // top untouched; the B7 city + B9 bake are hidden only while Google's tiles are really on screen and come back on any failure.
   let gCena = null, torreCamada = false;
   // Victor 07/10: OUR tower and city load first; Google's city starts downloading only after the facade texture and our
@@ -637,6 +640,7 @@ export function criarCena({ container, predio, unidades, teste = false,
   function render() {
     if (ceuFisico.visible) ceuFisico.position.copy(camera.position);
     seguirCamera();
+    rotulosForaDosBotoes();
     entB7.atualizarCamera(camera); // B7: ghost neighbours between camera and tower
     // at night OUR city (dark, lit windows) instead of Google's day photos (Victor 07/10 20:49); Google pauses (no download)
     const noiteCidade = false; // Google stays on at night: its tiles get the night grade + lit windows (google-vista.js)
@@ -734,7 +738,7 @@ export function criarCena({ container, predio, unidades, teste = false,
     const retrato = largura < altura;
     if (retrato !== ceuRetrato) {
       ceuRetrato = retrato;
-      if (estacaoAtual && solEstado.ultimo) { desenharArco(estacaoAtual); dirDisco = direcao(solEstado.ultimo.az, ELEV_TELA(solEstado.ultimo.el)); }
+      if (estacaoAtual && solEstado.ultimo) { desenharArco(estacaoAtual); dirDisco = direcao(solEstado.ultimo.az, elevDesenho(solEstado.ultimo.az, solEstado.ultimo.el)); }
     }
     pedirRender();
   }
@@ -870,12 +874,77 @@ export function criarCena({ container, predio, unidades, teste = false,
     sp.scale.set(e, e / 2, 1); sp.renderOrder = 5; sp.raycast = () => {};
     return sp;
   }
+  // 15/10 FILA D5: an hour label of the arc is hidden while its box (+8 px) falls on a control over the stage (top chips,
+  // "i", "Unidades", sun bar, legal line); on phones the "6h" sat on "Início". Rects are re-read at most every 250 ms.
+  const SELETORES_SOBRE = ['.topo .marca-nome', '.topo .legenda', '#btn-foto-real', '#btn-lista', '#btn-legal', '#sol-painel', '.linha-legal'];
+  let rectsSobre = [], rectsT = 0;
+  const vRot = new THREE.Vector3();
+  function lerRectsSobre() {
+    rectsT = performance.now();
+    const c = canvas.getBoundingClientRect();
+    rectsSobre = [];
+    for (const s of SELETORES_SOBRE) {
+      const e = document.querySelector(s);
+      if (!e || e.hidden || e.offsetParent === null) continue;
+      const r = e.getBoundingClientRect();
+      if (r.width > 0 && r.height > 0) rectsSobre.push([r.left - c.left - 8, r.top - c.top - 8, r.right - c.left + 8, r.bottom - c.top + 8]);
+    }
+  }
+  function rotulosForaDosBotoes() {
+    if (!rotulosHora.length || !arco.visible) return;
+    if (performance.now() - rectsT > 250) lerRectsSobre();
+    const k = camera.projectionMatrix.elements[5] * altura / 2; // px per sprite-scale unit (sizeAttenuation off)
+    for (const sp of rotulosHora) {
+      vRot.copy(sp.position).add(arco.position).project(camera);
+      if (vRot.z > 1) { sp.visible = false; continue; }
+      const x = (vRot.x * 0.5 + 0.5) * largura, y = (-vRot.y * 0.5 + 0.5) * altura;
+      const hw = sp.scale.x * k * 0.32, hh = sp.scale.y * k * 0.36; // the text fills ~2/3 of the 128x64 canvas
+      sp.visible = !rectsSobre.some(([x0, y0, x1, y1]) => x + hw > x0 && x - hw < x1 && y + hh > y0 && y - hh < y1);
+    }
+  }
   const vTmpCeu = new THREE.Vector3();
   let topoArco = null;
+  // 15/10 FILA D13 (C defect 13, F3 partly back): with the camera high, a sun of 30-40 deg drawn on the finite arc
+  // (2.5x the tower height) fell among the buildings, under the roof line on screen. The DRAWN elevation is now the
+  // smallest one that keeps the disc above the tower top on screen (+3% of the height), never below the true one;
+  // light and shadows keep the true direction. Below 12 deg the lift fades out (smoothstep 4-12 deg) so sunrise and
+  // sunset still sit on the horizon, behind the buildings, as in reality. Recomputed only when the camera moved.
+  const vEl = new THREE.Vector3(), vTopoEl = new THREE.Vector3(), vDirEl = new THREE.Vector3();
+  let topoElY = 0, chaveCamEl = '';
+  const SEM_LIFT = /[?&]arcolift=0/.test(location.search);
+  function discoAcimaDoTopo(az, e) {
+    direcao(az, e, vDirEl);
+    vEl.copy(CENTRO_ARCO).addScaledVector(vDirEl, RAIO_CEU).applyMatrix4(camera.matrixWorldInverse);
+    if (vEl.z > -1) return false; // behind the camera
+    vEl.applyMatrix4(camera.projectionMatrix);
+    return (-vEl.y * 0.5 + 0.5) * altura < topoElY - altura * 0.03;
+  }
+  function elevDesenho(az, el) {
+    const e0 = Math.max(0, el);
+    if (e0 <= 4 || SEM_LIFT) return e0;
+    vTopoEl.set(CX, TOPO, CZ).applyMatrix4(camera.matrixWorldInverse).applyMatrix4(camera.projectionMatrix);
+    topoElY = (-vTopoEl.y * 0.5 + 0.5) * altura;
+    if (discoAcimaDoTopo(az, e0) || !discoAcimaDoTopo(az, 85)) return e0; // already above, or sun behind the viewer
+    let lo = e0, hi = 85;
+    for (let k = 0; k < 12; k++) { const m = (lo + hi) / 2; if (discoAcimaDoTopo(az, m)) hi = m; else lo = m; }
+    return e0 + (hi - e0) * smooth(4, 12, e0);
+  }
+  function remapearArco() {
+    camera.updateMatrixWorld();
+    for (const x of arcoPts) { direcao(x.az, elevDesenho(x.az, x.el), x.d); x.p.copy(CENTRO_ARCO).addScaledVector(x.d, RAIO_CEU); }
+    const pos = arco.geometry.getAttribute('position');
+    if (pos && pos.count === arcoPts.length) { arcoPts.forEach((x, k) => pos.setXYZ(k, x.d.x * RAIO_CEU, x.d.y * RAIO_CEU, x.d.z * RAIO_CEU)); pos.needsUpdate = true; arco.geometry.computeBoundingSphere(); }
+    const hs = arcoPts.filter((x) => x.cheia), pm = marcasHora.geometry.getAttribute('position');
+    if (pm && pm.count === hs.length) { hs.forEach((x, k) => pm.setXYZ(k, x.d.x * RAIO_CEU, x.d.y * RAIO_CEU, x.d.z * RAIO_CEU)); pm.needsUpdate = true; }
+    rotulosHora.forEach((sp) => { if (sp.userData.pt) sp.position.copy(sp.userData.pt.d).multiplyScalar(RAIO_CEU * 1.06); });
+    if (solEstado.ultimo && solEstado.ultimo.el > -2) dirDisco = direcao(solEstado.ultimo.az, elevDesenho(solEstado.ultimo.az, solEstado.ultimo.el));
+  }
   function seguirCamera() {
     if (!arco.visible) return;
-    arco.position.copy(CENTRO); // F39: finite arc centred on the building
-    if (dirDisco) disco.position.copy(CENTRO).addScaledVector(dirDisco, RAIO_CEU);
+    arco.position.copy(CENTRO_ARCO); // F39: finite arc centred on the building (D13: on its top)
+    const ch = [camera.position.x, camera.position.y, camera.position.z].map((v) => Math.round(v * 2)).join() + '|' + largura + 'x' + altura + '|' + desloc.x + ',' + desloc.y;
+    if (ch !== chaveCamEl) { chaveCamEl = ch; remapearArco(); }
+    if (dirDisco) disco.position.copy(CENTRO_ARCO).addScaledVector(dirDisco, RAIO_CEU);
     return;
     // eslint-disable-next-line no-unreachable
     // pitch of the view + half the vertical lens = elevation of the top edge of the frame
@@ -976,10 +1045,12 @@ export function criarCena({ container, predio, unidades, teste = false,
     estacao.az.forEach((az, k) => {
       const el = estacao.el[k];
       if (el >= 0) {
-        const d = direcao(az, ELEV_TELA(el));
-        arcoPts.push({ t: ini + k * passo, d, p: CENTRO.clone().addScaledVector(d, RAIO_CEU) });
+        const d = direcao(az, ELEV_TELA(el)), t = ini + k * passo;
+        arcoPts.push({ t, az, el, cheia: Math.abs(t % 60) < 1e-6, d, p: CENTRO_ARCO.clone().addScaledVector(d, RAIO_CEU) });
       }
     });
+    camera.updateMatrixWorld();
+    arcoPts.forEach((x) => { direcao(x.az, elevDesenho(x.az, x.el), x.d); x.p.copy(CENTRO_ARCO).addScaledVector(x.d, RAIO_CEU); }); // D13
     arco.geometry.dispose();
     arco.geometry = new THREE.BufferGeometry().setFromPoints(arcoPts.map((x) => x.d.clone().multiplyScalar(RAIO_CEU)));
     arcoFantasma.geometry = arco.geometry; // same line, drawn faint over buildings
@@ -996,6 +1067,7 @@ export function criarCena({ container, predio, unidades, teste = false,
       cheias.filter((x) => quer.has(x.t / 60)).forEach((x) => {
         const sp = rotuloHora(`${x.t / 60}h`);
         sp.position.copy(x.d).multiplyScalar(RAIO_CEU * 1.06);
+        sp.userData.pt = x; // D13: follows its arc point when the drawn elevation changes with the camera
         arco.add(sp); rotulosHora.push(sp);
       });
     }
@@ -1019,6 +1091,60 @@ export function criarCena({ container, predio, unidades, teste = false,
     controls.dollyTo(distanciaAjuste() * 1.0, anim);
     acordar();
   }
+  // 15/10 FILA D12 (decision 8 "arc always visible"): the START view keeps its distance and the tower in the centre, but
+  // its azimuth (and, if needed, a lower camera within the allowed polar range) is chosen so the sun disc and as much of
+  // the arc as possible are inside the free part of the screen. Only once, at mount, and only if the client has not
+  // touched the camera yet; changing season/hour never moves the camera (F33 stays).
+  let usuarioMexeu = false, inicialFeito = false;
+  controls.addEventListener('controlstart', () => { usuarioMexeu = true; });
+  const vIni = new THREE.Vector3(), esfIni = new THREE.Spherical();
+  function enquadrarInicial() {
+    if (inicialFeito || usuarioMexeu || modoJanela || estado.unidade) return;
+    inicialFeito = true;
+    const s = solEstado.ultimo;
+    if (!s || s.el <= 0 || !arcoPts.length) return;
+    const alvo = new THREE.Vector3(); controls.getTarget(alvo);
+    const dist = controls.distance, pos0 = camera.position.clone(), q0 = camera.quaternion.clone();
+    const livreW = largura - desloc.x, livreH = altura - desloc.y;
+    // free box: the free area minus 32 px at the edges and minus the controls over the stage (chips, legend, "i", +16 px)
+    const x0 = 32, x1 = livreW - 32, y0 = 32, y1 = livreH - 32;
+    lerRectsSobre(); // controls over the stage (+8 px)
+    const tapas = rectsSobre.map(([a, b2, c, d]) => [a - 8, b2 - 8, c + 8, d + 8]);
+    const naTela = (p) => { vIni.copy(p).project(camera); if (vIni.z > 1) return null; return [(vIni.x * 0.5 + 0.5) * largura, (-vIni.y * 0.5 + 0.5) * altura]; };
+    const livre = (q) => !!q && q[0] > x0 && q[0] < x1 && q[1] > y0 && q[1] < y1 && !tapas.some(([a, b2, c, d]) => q[0] > a && q[0] < c && q[1] > b2 && q[1] < d);
+    const dentro = (p) => livre(naTela(p));
+    const ponto = (az, el) => CENTRO_ARCO.clone().addScaledVector(direcao(az, elevDesenho(az, el)), RAIO_CEU);
+    // the same hour in the other seasons: season changes never move the camera, so their discs should fit too
+    const SOLd = solEstado.SOL, outros = [];
+    if (SOLd) for (const e of Object.values(SOLd.estacoes)) {
+      const k = Math.round((s.t - hm(e.inicio)) / (SOLd.meta.passo_min || 15));
+      if (k >= 0 && k < e.el.length && e.el[k] > 0) outros.push([e.az[k], e.el[k]]);
+    }
+    const az0 = VISTAS.inicio.az;
+    let melhor = null;
+    for (const pol of [POL.inicio, (POL.inicio + POL.max) / 2, POL.max]) {
+      for (let k = 0; k < 72; k++) {
+        const az = az0 + (k * Math.PI) / 36;
+        esfIni.set(dist, pol, az);
+        camera.position.copy(alvo).add(vIni.setFromSpherical(esfIni)); camera.lookAt(alvo); camera.updateMatrixWorld();
+        const q = naTela(ponto(s.az, s.el));
+        if (!livre(q)) continue;
+        const centro = 1 - Math.min(1, Math.hypot((q[0] - (x0 + x1) / 2) / (x1 - x0), (q[1] - (y0 + y1) / 2) / (y1 - y0)) * 2);
+        const nOutros = outros.filter(([a, e]) => dentro(ponto(a, e))).length;
+        const nArco = arcoPts.filter((x) => dentro(ponto(x.az, x.el))).length;
+        const desvio = Math.abs(Math.atan2(Math.sin(az - az0), Math.cos(az - az0)));
+        const nota = nOutros + nArco / arcoPts.length + 0.5 * centro - desvio * 0.05 - (pol - POL.inicio) * 0.5;
+        if (!melhor || nota > melhor.nota) melhor = { nota, az, pol, nOutros, nArco };
+      }
+      if (melhor && melhor.nOutros === outros.length) break; // every season fits at this height: do not lower the camera
+    }
+    estado.enquadramentoInicial = melhor && { az: +THREE.MathUtils.radToDeg(melhor.az).toFixed(1), outrasEstacoes: `${melhor.nOutros}/${outros.length}`, arco: `${melhor.nArco}/${arcoPts.length}` };
+    camera.position.copy(pos0); camera.quaternion.copy(q0); camera.updateMatrixWorld();
+    if (!melhor) return;
+    controls.rotateTo(melhor.az, melhor.pol, false);
+    chaveCamEl = ''; // re-map the drawn arc for the new view
+    pedirRender();
+  }
   const cTemp = new THREE.Color();
   let sombraUlt = null;
   function setSol(i, { estacao = null, movendo = false, enquadrar = false } = {}) {
@@ -1036,7 +1162,7 @@ export function criarCena({ container, predio, unidades, teste = false,
       const d = direcao(i.az, Math.max(i.el, 0.5));
       sol.position.copy(CENTRO).addScaledVector(d, 420); // same direction as the arc/disc; F40: far enough for the 250 m shadow box
       sol.target.position.copy(CENTRO);
-      dirDisco = direcao(i.az, ELEV_TELA(i.el));
+      camera.updateMatrixWorld(); dirDisco = direcao(i.az, elevDesenho(i.az, i.el)); // D13: drawn elevation (light keeps the true one)
       disco.visible = i.el >= 0;
       seguirCamera();
     } else disco.visible = false;
@@ -1098,6 +1224,7 @@ export function criarCena({ container, predio, unidades, teste = false,
     const dSol = sombraUlt ? Math.hypot(i.az - sombraUlt.az, i.el - sombraUlt.el) : 99;
     if (!movendo || dSol > 0.5) { renderer.shadowMap.needsUpdate = true; sombraUlt = { az: i.az, el: i.el }; }
     if (enquadrar) enquadrarSol(true); // F33: only on an explicit request
+    if (primeiro) enquadrarInicial(); // D12: start view only (once, before any gesture)
     if (mudouFlags || (luzesAntes > 0.01) !== (solEstado.luzes > 0.01)) pintar();
     else { matUnidNoite.opacity = solEstado.luzes; if (meshListras) meshListras.material.opacity = (estado.andar != null ? 0.6 : 1) * (1 - solEstado.luzes); pedirRender(); }
   }
@@ -1265,10 +1392,10 @@ export function criarCena({ container, predio, unidades, teste = false,
     const ds = disco.visible ? projetar(disco.position.x, disco.position.y, disco.position.z) : null;
     const norte = direcao(0, 0);
     seguirCamera();
-    return { ...solEstado.ultimo, ceu: true, elevTela: solEstado.ultimo ? +ELEV_TELA(solEstado.ultimo.el).toFixed(1) : null, discoNaTela: ds ? [Math.round(ds.x), Math.round(ds.y)] : null,
+    return { ...solEstado.ultimo, ceu: true, inicial: estado.enquadramentoInicial || null, elevTela: solEstado.ultimo ? +elevDesenho(solEstado.ultimo.az, solEstado.ultimo.el).toFixed(1) : null, discoNaTela: ds ? [Math.round(ds.x), Math.round(ds.y)] : null,
       discoAltura_m: +disco.position.y.toFixed(1), topoPredio_m: +TOPO.toFixed(1), raioArco_m: +RAIO_ARCO.toFixed(1),
       discoAcimaDoTopoNaTela: ds ? ds.y < topo.y : null, arcoPontos: arcoPts.length, arcoMinY_m: arcoPts.length ? +Math.min(...arcoPts.map((x) => x.p.y)).toFixed(1) : null,
-      norteNaCena: [+norte.x.toFixed(3), +norte.z.toFixed(3)], luzMesmaDirecao: disco.visible ? +sol.position.clone().sub(CENTRO).normalize().dot(disco.position.clone().sub(CENTRO).normalize()).toFixed(4) : null };
+      norteNaCena: [+norte.x.toFixed(3), +norte.z.toFixed(3)], luzMesmaDirecao: disco.visible ? +sol.position.clone().sub(CENTRO).normalize().dot(disco.position.clone().sub(CENTRO_ARCO).normalize()).toFixed(4) : null };
   }
 
   return {

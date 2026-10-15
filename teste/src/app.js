@@ -245,6 +245,7 @@ function abrirUnidade(id) {
           el('input', { class: 'link-txt mono', id: 'link-txt', readonly: true, value: linkUnidade(u), 'aria-label': 'Link desta unidade' })),
         el('p', { class: 'legenda-pequena', text: `Fonte: tabela do CV de 05/10/2026${u.fonte?.includes('pagina') ? ', ' + u.fonte.split(', ')[1].replace('pagina', 'página') : ''}.` }))),
   );
+  corpo.scrollTop = 0; // 15/10 FILA D15: a new unit always opens at the top (the old scroll position was kept)
   // WhatsApp icon
   const ico = $('#btn-wa svg');
   ico.outerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2a10 10 0 0 0-8.6 15.1L2 22l5-1.3A10 10 0 1 0 12 2Zm0 18.2c-1.5 0-3-.4-4.3-1.2l-.3-.2-3 .8.8-2.9-.2-.3A8.2 8.2 0 1 1 12 20.2Zm4.5-6.1c-.2-.1-1.5-.7-1.7-.8-.2-.1-.4-.1-.6.1l-.8 1c-.1.2-.3.2-.5.1a6.7 6.7 0 0 1-3.3-2.9c-.2-.4.2-.4.7-1.3.1-.2 0-.3 0-.5l-.8-1.8c-.2-.5-.4-.4-.6-.4h-.5a1 1 0 0 0-.7.3 3 3 0 0 0-.9 2.2 5.2 5.2 0 0 0 1.1 2.8 11.9 11.9 0 0 0 4.6 4c1.7.7 2.4.8 3.2.6.5-.1 1.5-.6 1.7-1.2.2-.6.2-1.1.1-1.2l-.5-.3Z"/></svg>';
@@ -259,8 +260,10 @@ function abrirUnidade(id) {
   estavaListaAberta = !$('#unidades').hidden; $('#unidades').hidden = true;
   $('#card').hidden = false;
   atualizarPainel();
-  // the single "Entrar no apartamento" button: the 360 tour when its manifest is live (08:15 switch), else the real video tour
-  Promise.all([manifestoTour360().catch(() => null), import('./splat-interior.js').then((m) => m.splatDisponivel()).catch(() => null)]).then(([t360, spl]) => {
+  // the single "Entrar no apartamento" button: the 360 tour when its manifest is live (08:15 switch), else the real video tour.
+  // 15/10 D16: the video tour (splat) is off (decision 1) and its files are never published: probe it only when the 360 is absent
+  // (the probe was a 404 on every card).
+  manifestoTour360().catch(() => null).then(async (t360) => [t360, t360 ? null : await import('./splat-interior.js').then((m) => m.splatDisponivel()).catch(() => null)]).then(([t360, spl]) => {
     const b = $('#btn-splat'); if (!b || app.unidade !== id || !(t360 || spl)) return;
     b.hidden = false;
     if (t360) { b.firstChild.textContent = 'Entrar no apartamento'; const sm = b.querySelector('.btn-sub'); if (sm) sm.remove(); }
@@ -308,6 +311,8 @@ async function copiarLink(u) {
   setTimeout(() => { b.textContent = 'Copiar link desta unidade'; }, 2600);
 }
 
+// "R$ 1,125 mi" (hover label and the phone tour bar)
+const precoCurtoMi = (v) => 'R$ ' + (v / 1e6).toLocaleString('pt-BR', { minimumFractionDigits: 3, maximumFractionDigits: 3 }) + ' mi';
 // ---------------------------------------------------------------- F12: hover label (desktop)
 function mostrarEtiqueta(h) {
   const e = $('#etiqueta');
@@ -318,7 +323,7 @@ function mostrarEtiqueta(h) {
   } else {
     const u = h.u;
     const s = STATUS[u.situacao].rotulo;
-    const preco = u.preco_total ? ' · R$ ' + (u.preco_total / 1e6).toLocaleString('pt-BR', { minimumFractionDigits: 3, maximumFractionDigits: 3 }) + ' mi' : '';
+    const preco = u.preco_total ? ' · ' + precoCurtoMi(u.preco_total) : '';
     e.replaceChildren(el('b', { text: u.numero }), ` · ${s}${preco}`);
   }
   e.style.left = h.x + 'px'; e.style.top = h.y + 'px';
@@ -472,6 +477,7 @@ async function carregarInterior() {
 // ---------------------------------------------------------------- gallery: real 2026 frames (+ B6 stills if present)
 let fotosGaleria = CONFIG.fotos2026.lista.map((f) => ({ ...f, legenda: CONFIG.fotos2026.legenda }));
 (async () => {
+  if (!CONFIG.demo.rendersManifesto) return; // 15/10 D16: no stills manifest published -> no request (was a 404 per opening)
   try {
     const r = await fetch(CONFIG.demo.rendersManifesto, { cache: 'no-cache' });
     if (!r.ok) return;
@@ -515,7 +521,9 @@ function preencherBarraInterior(u) {
   $('#ib-txt').replaceChildren(el('span', { class: 'ib-l1' }, [el('b', { text: `Unidade ${u.numero}` }), el('span', { class: 'ib-andar', text: ` · ${u.andar}º andar` }),
     el('span', { class: 'ib-sep', text: ' · ' }), el('span', { class: `ib-sit ${u.situacao}`, text: s.rotulo })]),
     el('span', { class: 'ib-l2' }, [el('span', { class: 'ib-andar-c', text: `${u.andar}º andar · ` }),
-      u.preco_total != null ? el('span', { class: 'mono ib-preco', text: brl(u.preco_total).replace(',00', '') }) : '']));
+      u.preco_total != null ? el('span', { class: 'mono ib-preco', text: brl(u.preco_total).replace(',00', '') }) : '',
+      // 15/10 FILA D3: the phone bar shows the short price (same format as the hover label), never a cut "R$ 1.125.00"
+      u.preco_total != null ? el('span', { class: 'mono ib-preco-curto', text: precoCurtoMi(u.preco_total) }) : '']));
   $('#ib-wa').href = linkWhatsapp(u);
   $('#int-detalhes').hidden = true;
   $('#int-det-eyebrow').textContent = `${u.andar}º andar · final ${u.final}`;
@@ -858,7 +866,8 @@ montarFiltros();
 ligar();
 aplicarFiltro();
 if (!deepLink() && params.has('semabertura')) fecharAbertura();
-carregarVistaFoto();
+// 15/10 FILA D17a: the painted-units photo view is off since 08/10 (decision 10); building it under the opening downloaded
+// its SVG and night layers for nothing. carregarVistaFoto stays in the file for a future building that wants it.
 iniciar3D().finally(() => document.documentElement.setAttribute('data-app', 'pronto'));
 
 Object.assign(app, { pedirSaida, interiorAberto: () => interiorAberto, alternarSol, carregarSol, abrirUnidade, fecharCard, destacarAndar, fecharAbertura, painelUnidades,

@@ -48,10 +48,11 @@ export const CONFIG = {
 
   // Demo (07/10): features that depend on other fronts stay OFF unless their files exist (never half-working).
   demo: {
-    // B6 photoreal stills: shown first in the gallery only if this manifest exists ({ fotos: [{ arq, legenda }] })
-    rendersManifesto: 'assets/render/demo/manifest.json',
+    // B6 photoreal stills: shown first in the gallery only if this manifest exists ({ fotos: [{ arq, legenda }] }).
+    // null = no request at all (15/10 FILA D16: the demo manifest is never published, so it was a 404 on every opening)
+    rendersManifesto: null,
     // B6 360 tour: replaces the 3D interior only if this manifest exists (the real batch); ?tour360=amostra tests the sample
-    tour360Ativo: true, // OFF until B6 confirms a batch without unconfirmed lights (coordinator 22:5x)
+    tour360Ativo: true, // ON since 08/10 (v4 batch, only lamps whose fixture is seen: teto, abajur, cozinha)
     tour360Manifesto: 'assets/render/tour360/manifesto.json', // B6's v3 batch writes manifesto.json (manifest.json 404'd)
     tour360Amostra: 'assets/render/tour360/manifesto.json',
   },

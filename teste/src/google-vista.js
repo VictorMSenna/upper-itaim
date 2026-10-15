@@ -1,12 +1,14 @@
-// Optional live layer (front B10, LOCAL TEST ONLY): the city seen through the windows of the 360 tour comes from Google
+// Live layer (front B10, ON in the published site since 07/10; ?google3d=0 turns it off): the city seen through the windows of the 360 tour comes from Google
 // Photorealistic 3D Tiles (Map Tiles API), rendered with a three.js camera standing where the panorama was taken.
 //
 // Rules from the Google terms (briefing pacote-google-3d-tiles.md): Google logo + aggregated attribution on screen, say
 // "Cidade: Google", no storing of tiles (only the in-memory renderer cache), no extraction, Google's mesh is never hidden or
-// clipped (our model is only drawn OVER it). Everything here is optional: no key / any error / quota hit / trial ended =>
+// clipped (our model is only drawn OVER it) [15/10 note: the tower/lot cut in the outside view is under review by the
+// Google-terms front, audit A R5]. Everything here is optional: no key / any error / quota hit / trial ended =>
 // `iniciarGoogle()` resolves false and the tour keeps its current look, with no message to the visitor.
 //
-// The key is NEVER in a file: it is read from window.__G3D_KEY (injected by the test harness) or ?gkey= on the URL.
+// The key is NEVER in the project source: window.__G3D_KEY (local test harness), ?gkey= (tests), else src/g3d-chave.js, which
+// exists ONLY in the published copies (written by docs/b10-scripts/prepara_pages.py / prepara_teste.py, site key restricted by referrer).
 import * as THREE from 'three';
 import { capacidade } from './capacidade.js';
 import { smooth, fatorDia, fatorLuzesNoite } from './luz-curva.js';
@@ -788,6 +790,9 @@ export async function ligarGoogleCena({ scene, camera, renderer, ref, aoMudar, e
   carga.innerHTML = '<span>Montando a cidade real</span><i style="display:block;height:2px;border-radius:2px;background:rgba(255,255,255,.25);overflow:hidden"><b style="display:block;height:100%;width:4%;background:#fff;transition:width .4s ease"></b></i>';
   renderer.domElement.parentElement.appendChild(carga);
   let lote0 = null, pMax = 0;
+  // 15/10 FILA D11: back from the 360 the tiles of the near city had been dropped (the window owned the budget), so the
+  // front buildings stayed blurred while they refined, with no sign. The bar comes back until the view is complete again.
+  let refino = null;
   const aoCarregar = () => aoMudar && aoMudar();
   for (const ev of ['load-model', 'tiles-load-end', 'needs-update']) tiles.addEventListener(ev, aoCarregar);
   const out = [];
@@ -809,7 +814,11 @@ export async function ligarGoogleCena({ scene, camera, renderer, ref, aoMudar, e
       try {
         const t0 = performance.now();
         if (s.dono && s.dono !== api && s.dono.ativo) return; // the 360 window owns the tiles while it is open
-        if (s.dono !== api) { s.tomar(api, scene, m, camSelFora, ERRO_360 * 1.25); s.pintar(ganhoCena); }
+        if (s.dono !== api) {
+          const voltando = !!s.dono && mostrando;
+          s.tomar(api, scene, m, camSelFora, ERRO_360 * 1.25); s.pintar(ganhoCena);
+          if (voltando) { refino = { lote0: null, pMax: 0, t0: performance.now() }; carga.querySelector('b').style.width = '4%'; renderer.domElement.parentElement.appendChild(carga); bombear(); }
+        }
         // tiles are selected only for the part of the screen above the unit card (phone bottom sheet): the city hidden
         // under the card is not downloaded and does not take the memory the prefetch of the unit's window needs
         renderer.getDrawingBufferSize(tam); camera.updateMatrixWorld(true);
@@ -830,6 +839,12 @@ export async function ligarGoogleCena({ scene, camera, renderer, ref, aoMudar, e
           // Google replaces our city when its view is 85% there, complete, or when this device's memory budget is full
           // (on mid phones the budget fills before 'complete': it never switched - Victor 07/10 21h50)
           if (st.visible > 8 && (pend === 0 || pMax >= 0.85 || tiles.lruCache.isFull())) { mostrando = true; carga.remove(); cred.hidden = !!api.noite; }
+        }
+        if (refino) {
+          if (refino.lote0 == null) refino.lote0 = st.loaded;
+          const feitos = st.loaded - refino.lote0; refino.pMax = Math.max(refino.pMax, pend > 0 ? feitos / (feitos + pend) : 1);
+          carga.querySelector('b').style.width = Math.round(4 + 96 * refino.pMax) + '%';
+          if ((pend === 0 && tiles.loadProgress >= 1 && performance.now() - refino.t0 > 500) || (tiles.lruCache.isFull() && pend === 0 && performance.now() - refino.t0 > 3000) || performance.now() - refino.t0 > 30000) { carga.remove(); refino = null; }
         }
         if (api.preFoto) { // photo prefetch: next region when the queue is empty (or after 15 s); done after the last one
           const P = api.preFoto; P.q = pend === 0 ? P.q + 1 : 0;

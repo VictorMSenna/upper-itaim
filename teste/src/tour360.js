@@ -35,7 +35,7 @@ async function criar({ container, manifesto = 'assets/render/tour360/manifesto.j
   // Google city of the unit); otherwise the first point with a window mask; the manifest order last (07/10 Victor)
   const pontoInicial = () => (man.pontos.find((p) => p.id === 'entrada' && p.camadas && p.camadas.fora) || man.pontos.find((p) => p.camadas && p.camadas.fora) || man.pontos[0]).id; // Victor 08/10: the tour starts at the entrance
   const estado = { estacao, minutos, luzes: { ...luzes }, ponto: ponto && PTS[ponto] ? ponto : pontoInicial() };
-  let G = null; // B10 (local test): optional live layer with Google Photorealistic 3D Tiles behind the `fora` window mask; null = current behaviour
+  let G = null; // B10 (ON in the published site): live layer with Google Photorealistic 3D Tiles behind the `fora` window mask; null = current behaviour
 
   // ---------------------------------------------------------------- DOM
   const raiz = document.createElement('div');
@@ -46,7 +46,8 @@ async function criar({ container, manifesto = 'assets/render/tour360/manifesto.j
     <div class="t360-vista" hidden>Vista simulada</div>
     <div class="t360-nome"></div>
     <div class="t360-luzes">${LUZES.filter((k) => man.pontos.some((p) => p.camadas && p.camadas[k])).map((k) => `<button data-luz="${k}" aria-pressed="false" title="${NOMES_LUZ[k]}"><span class="l-longo">${NOMES_LUZ[k]}</span><span class="l-curto">${CURTO_LUZ[k]}</span></button>`).join('')}</div>
-    <button class="t360-fechar" aria-label="Fechar">×</button>`;
+    <button class="t360-fechar" aria-label="Fechar">×</button>
+    <div class="t360-chips"></div>`;
   // 08/10 Victor: the city reflected in the balcony glass is nice but sometimes in the way -> on/off, only where there is glass
   const bR = document.createElement('button'); bR.className = 't360-reflexo'; bR.hidden = true; bR.setAttribute('aria-pressed', 'true');
   bR.innerHTML = '<span class="l-longo">Reflexo no vidro</span><span class="l-curto">Reflexo</span>';
@@ -70,6 +71,9 @@ async function criar({ container, manifesto = 'assets/render/tour360/manifesto.j
     .t360-luzes{position:absolute;right:12px;top:56px;display:flex;flex-direction:column;gap:6px}
     .t360-luzes button{padding:6px 10px;border-radius:999px;border:1px solid rgba(255,255,255,.5);background:rgba(0,0,0,.45);color:#fff;cursor:pointer}
     .t360-luzes button[aria-pressed="true"]{background:#f5c66b;color:#222;border-color:#f5c66b}
+    .t360-chips{position:absolute;inset:0;pointer-events:none;z-index:4}
+    .t360-chip{position:absolute;transform:translate(-50%,-100%);pointer-events:auto;display:inline-flex;align-items:center;gap:6px;min-height:36px;padding:0 13px;border-radius:999px;border:1px solid rgba(255,255,255,.65);background:rgba(16,18,17,.8);color:#fff;font:600 12.5px/1 system-ui,sans-serif;white-space:nowrap;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.35)}
+    .t360-chip i{font-style:normal;font-size:14px;opacity:.85}
     .t360-fechar{position:absolute;right:12px;top:12px;width:36px;height:36px;border-radius:50%;border:0;background:rgba(0,0,0,.55);color:#fff;font-size:22px;cursor:pointer}`;
     document.head.appendChild(css);
   }
@@ -198,6 +202,66 @@ async function criar({ container, manifesto = 'assets/render/tour360/manifesto.j
     const ok = v.z < 1 && Math.abs(v.x) < 1 && Math.abs(v.y) < 1;
     elVista.hidden = !ok || !!(G && G.malha.visible); // B10: with Google's city the credit pill replaces "Vista simulada"
     if (ok) { elVista.style.left = `${(v.x * 0.5 + 0.5) * 100}%`; elVista.style.top = `${(-v.y * 0.5 + 0.5) * 100}%`; }
+    atualizaChips();
+  }
+
+  // 15/10 FILA D4 (C defect 4): on phones the floor rings fell under the sun bar or were cut at the screen edge. Every
+  // neighbour point whose ring is not tappable (behind the camera, < 24 px from an edge, or under a control over the
+  // image) gets a chip just above the sun bar, with its name and the side it is on; a tap walks there (same as the ring).
+  const chipsBox = raiz.querySelector('.t360-chips');
+  const COBRE = ['#interior-sol', '#int-barra', '#interior-fechar', '.t360-luzes', '.t360-nome', '.int-luzes-barra', '.t360-rot', '.int-rodape', '#int-detalhes'];
+  let chipsSig = '', chipsAtuais = [];
+  const vC = new THREE.Vector3(), vF = new THREE.Vector3(), vD = new THREE.Vector3();
+  function atualizaChips() {
+    if (fechado) return;
+    const r = cv.getBoundingClientRect();
+    if (andando || !r.width) { if (chipsSig) { chipsSig = ''; chipsAtuais = []; chipsBox.replaceChildren(); } return; }
+    const tampas = [];
+    for (const s of COBRE) for (const el of document.querySelectorAll(s)) {
+      if (el.hidden || el.offsetParent === null) continue;
+      const q = el.getBoundingClientRect(); if (q.width && q.height) tampas.push(q);
+    }
+    const sol = document.querySelector('#interior-sol');
+    let baseY = sol && sol.offsetParent !== null && sol.getBoundingClientRect().height ? sol.getBoundingClientRect().top - 10 : r.bottom - 20;
+    for (const d of document.querySelectorAll('#interior-sol .sol-dica')) if (!d.hidden && d.offsetParent !== null) baseY = Math.min(baseY, d.getBoundingClientRect().top - 6); // the 'segure' hint sits above the bar
+    { const ri = raiz.querySelector('.t360-rot'); if (ri && ri.offsetParent !== null) { const q = ri.getBoundingClientRect(); if (q.bottom > baseY - 40) baseY = Math.min(baseY, q.top - 6); } } // and the 'i' of the image
+    camera.getWorldDirection(vF); vF.y = 0; vF.normalize();
+    const precisa = [];
+    for (const m of grupoHot.children) {
+      vC.copy(m.position).project(camera);
+      const x = r.left + (vC.x * 0.5 + 0.5) * r.width, y = r.top + (-vC.y * 0.5 + 0.5) * r.height, R2 = 22;
+      const naTela = vC.z < 1 && x > r.left + 24 && x < r.right - 24 && y > r.top + 24 && y < r.bottom - 24;
+      const tapado = tampas.some((q) => x + R2 > q.left && x - R2 < q.right && y + R2 > q.top && y - R2 < q.bottom);
+      if (naTela && !tapado) continue;
+      vD.copy(m.position).sub(camera.position); vD.y = 0;
+      const ang = THREE.MathUtils.radToDeg(Math.atan2(vD.x * -vF.z + vD.z * vF.x, vD.x * vF.x + vD.z * vF.z)); // + = to the right
+      precisa.push({ id: m.userData.id, ang });
+    }
+    precisa.sort((a, b) => a.ang - b.ang);
+    const meiaFov = THREE.MathUtils.radToDeg(Math.atan(Math.tan(THREE.MathUtils.degToRad(fov / 2)) * camera.aspect));
+    const W = r.width, larg = 120;
+    let ultimoX = -1e9;
+    const lista = precisa.map((c) => {
+      let x = Math.abs(c.ang) < meiaFov ? W / 2 + (c.ang / meiaFov) * (W / 2) : (c.ang < 0 ? 0 : W);
+      x = Math.max(larg / 2 + 8, Math.min(W - larg / 2 - 8, x));
+      if (x - ultimoX < larg + 6) x = ultimoX + larg + 6;
+      ultimoX = x;
+      return { ...c, x, seta: c.ang < -12 ? '←' : c.ang > 12 ? '→' : '↓' };
+    });
+    // too many for one row: keep them inside the screen, packed from the right edge back
+    for (let k = lista.length - 1; k >= 0; k--) { const lim = W - larg / 2 - 8 - (lista.length - 1 - k) * (larg + 6); if (lista[k].x > lim) lista[k].x = lim; }
+    const sig = lista.map((c) => c.id + ':' + Math.round(c.x / 8) + c.seta).join('|') + '@' + Math.round(baseY);
+    if (sig === chipsSig) return;
+    chipsSig = sig; chipsAtuais = lista.map((c) => ({ id: c.id, x: r.left + c.x, y: baseY }));
+    chipsBox.replaceChildren(...lista.map((c) => {
+      const b = document.createElement('button'); b.type = 'button'; b.className = 't360-chip'; b.dataset.id = c.id;
+      b.style.left = c.x + 'px'; b.style.top = (baseY - r.top) + 'px';
+      const i = document.createElement('i'); i.textContent = c.seta; i.setAttribute('aria-hidden', 'true');
+      b.append(...(c.seta === '→' ? [PTS[c.id].nome, i] : [i, PTS[c.id].nome]));
+      b.setAttribute('aria-label', 'Ir para ' + PTS[c.id].nome);
+      b.addEventListener('click', (ev) => { ev.stopPropagation(); irPara(c.id); });
+      return b;
+    }));
   }
 
   // ---------------------------------------------------------------- walking between points
@@ -246,14 +310,14 @@ async function criar({ container, manifesto = 'assets/render/tour360/manifesto.j
     if (fechado) return; fechado = true;
     if (G) { try { G.liberar(); } catch (e) { /* ignore */ } G = null; }
     for (const e of esferas.values()) { e.mix.liberar(); e.m.geometry.dispose(); e.m.material.dispose(); }
-    renderer.dispose(); raiz.remove(); window.removeEventListener('resize', redim);
+    renderer.dispose(); raiz.remove(); window.removeEventListener('resize', redim); chipsBox.replaceChildren();
     if (atual && atual.raiz === raiz) atual = null;
     if (chamaCb && aoFechar) aoFechar();
   }
   raiz.querySelector('.t360-fechar').addEventListener('click', () => fechar(true));
   window.addEventListener('resize', redim);
 
-  // ---------------------------------------------------------------- B10: Google 3D Tiles behind the window mask (opt-in ?google3d=1, key injected at runtime)
+  // ---------------------------------------------------------------- B10: Google 3D Tiles behind the window mask (on by default, ?google3d=0 off; key from src/g3d-chave.js)
   // Where the point's `fora` mask is white the city is drawn from Google's tiles with a camera at the panorama's real position
   // (manifest `geo`: lat, lon, h ellipsoid, rumo = bearing of the pano centre). The panorama sphere stays untouched underneath,
   // so any failure (no key, quota, error, trial ended) just removes the overlay and the current look remains, silently.
@@ -431,6 +495,7 @@ ${navigator.userAgent.slice(0, 120)}`; };
     hotspots: () => { const r = cv.getBoundingClientRect(); return grupoHot.children.map((m) => { const v = m.position.clone().project(camera);
       return { id: m.userData.id, x: r.left + (v.x * 0.5 + 0.5) * r.width, y: r.top + (-v.y * 0.5 + 0.5) * r.height, visivel: v.z < 1 && Math.abs(v.x) < 1 && Math.abs(v.y) < 1 }; }); },
     cursor: () => cv.className,
+    chips: () => chipsAtuais.slice(), // D4: neighbours reachable by a chip (rings not tappable from this view)
     estado: () => ({ ...estado, luzes: { ...estado.luzes }, yaw, pitch, fov, expo: esfera(estado.ponto).mix.ultimo?.expo, lG: esfera(estado.ponto).mix.ultimo?.lG, google: G ? { ...(window.__g3d || {}), ms: G.perf.n ? G.perf.ms / G.perf.n : 0, max: G.perf.max, n: G.perf.n } : null }),
     fechar: () => fechar(true),
     renderer,

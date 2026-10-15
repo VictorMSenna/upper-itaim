@@ -492,20 +492,20 @@ function carregarTextura(url, renderer, ms = 30000) {
     ok(t);
   }, undefined, () => erro(new Error('falhou: ' + url.split('/').pop())))), ms, url.split('/').pop()));
 }
-// geometry: .glb first; if the host refuses/misses it, the same bytes as base64 in <name>.glb.json (published pages
-// may not carry .glb files - E1, 06/10: the artifact had every texture but neither .glb)
+// geometry: the same bytes as base64 in <name>.glb.json FIRST (the published host never carries .glb - E1 06/10, SOL-1111),
+// the binary .glb only as a fallback for local tests. 15/10 (FILA D16): the old order cost 3 x 404 on every opening.
 function carregarGlb(nome, ms = 30000) {
   return emCache('glb:' + nome, () => comPrazo((async () => {
-    let buf = null, via = 'glb';
+    let buf = null, via = 'json';
     try {
-      const r = await fetch(BASE + nome); if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      buf = await r.arrayBuffer();
-      if (new DataView(buf).getUint32(0, true) !== 0x46546C67) throw new Error('nao e glb');
-    } catch (e) {
-      const r = await fetch(BASE + nome + '.json'); if (!r.ok) throw new Error(`${nome}: ${e.message}; .json HTTP ${r.status}`);
+      const r = await fetch(BASE + nome + '.json'); if (!r.ok) throw new Error(`.json HTTP ${r.status}`);
       const bin = atob((await r.json()).b64); const u8 = new Uint8Array(bin.length);
       for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
-      buf = u8.buffer; via = 'json';
+      buf = u8.buffer;
+    } catch (e) {
+      const r = await fetch(BASE + nome); if (!r.ok) throw new Error(`${nome}: ${e.message}; .glb HTTP ${r.status}`);
+      buf = await r.arrayBuffer(); via = 'glb';
+      if (new DataView(buf).getUint32(0, true) !== 0x46546C67) throw new Error(nome + ': nao e glb');
     }
     const gltf = await new Promise((ok, erro) => new GLTFLoader().parse(buf, '', ok, erro));
     gltf.scene.updateMatrixWorld(true);

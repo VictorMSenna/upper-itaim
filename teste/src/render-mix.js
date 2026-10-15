@@ -125,15 +125,22 @@ uniform float raioVis;
 uniform float pesoN;
 // partial sun (rug fibres, fabric, sheer curtain, penumbra) is stored as a dither of lit / unlit texels: average the
 // neighbours of the SAME surface (normal agreement) so it shows as the partial light it is, not as grain
+// 15/10 FILA D9 (C defect 9, reproduced: jagged edge + dots on the rug, PC 14:00): the weights now depend on the distance
+// from the PIXEL (not from the texel centre) with a smooth kernel that reaches 0 at the edge of the window (raioVis + 0.5
+// texels), so the sun patch is a continuous, smooth edge when magnified instead of square steps; same texel reads as before.
 float visSol(vec2 uv){
-  vec2 d = 1.0 / visTam; vec2 c0 = (floor(uv * visTam) + 0.5) * d;
+  vec2 d = 1.0 / visTam; vec2 t = uv * visTam; vec2 c0 = (floor(t) + 0.5) * d; vec2 fr = t - (floor(t) + 0.5);
   vec3 n0 = texture2D(tNor, uv).rgb * 2.0 - 1.0;
+  float sup2 = (raioVis + 0.5) * (raioVis + 0.5);
   float s = 0.0, w = 0.0;
   for (int j = -2; j <= 2; j++) for (int i = -2; i <= 2; i++) {
     if (float(i * i) > raioVis * raioVis || float(j * j) > raioVis * raioVis) continue;
+    vec2 o = vec2(float(i), float(j)) - fr;
+    float k = max(0.0, 1.0 - dot(o, o) / sup2); k *= k;
+    if (k <= 0.0) continue;
     vec2 q = c0 + vec2(float(i), float(j)) * d;
     vec3 n = texture2D(tNor, q).rgb * 2.0 - 1.0;
-    float wq = mix(1.0, smoothstep(0.35, 0.8, dot(n, n0)), pesoN) * exp(-0.25 * float(i * i + j * j)); // fabric/rug bump normals still count as the same surface
+    float wq = mix(1.0, smoothstep(0.35, 0.8, dot(n, n0)), pesoN) * k; // fabric/rug bump normals still count as the same surface
     s += acesa(q) * wq; w += wq;
   }
   return w > 1e-4 ? s / w : acesa(c0);
@@ -442,7 +449,7 @@ void main(){
     // enter as tiny numbers (abajur escala 0.004 x pow(v, 2.2) < 1e-4) that round in steps. The exposure is folded into
     // each layer's scale BEFORE the sum, so every term is near 1 in the shader (same image, no underflow).
     const K = U.expo.value;
-    { const c = m.map((x, i) => x * U.wb.value.getComponent(i)); U.ambSala.value = lum(c) * K; const NN = +(new URLSearchParams(location.search).get('pufeN')) || 1.6; U.pufeNoite.value = NN + (1 - NN) * kDia; } // R4: mean room luminance after exposure; night lift x2.2 (amber lamps on navy = black)
+    { const c = m.map((x, i) => x * U.wb.value.getComponent(i)); U.ambSala.value = Math.max(lum(c) * K, ALVO * (1 - kDia)); /* 15/10 FILA D10: from the balcony the room is far and dim, the night gain hits its 4.5 cap and the pouf's ambient fell to ~1/3 of the other points (top face black, lit front band): at night it never goes below the uncapped value (= ALVO) */ const NN = +(new URLSearchParams(location.search).get('pufeN')) || 1.6; U.pufeNoite.value = NN + (1 - NN) * kDia; } // R4: mean room luminance after exposure; night lift x2.2 (amber lamps on navy = black)
     for (let i = 0; i < 7; i++) U.esc.value[i] *= K;
     U.gDir.value.multiplyScalar(K); U.expo.value = 1;
     // local adaptation: day strength 0.5, night 0.2 (keeps the mood of the lamps); ?sloc= tests, ?sloc=0 = off

@@ -289,7 +289,7 @@ export function secaoSolUnidade(rel, CFG, u) {
     resumo.textContent = ints.length
       ? `Sol na sacada: ${ints.join(' e ')} (~${durTxt(d.horas)}) · ${NOME_EST[i.est]}, ${dataBR(e.data)}`
       : `Sem sol direto na sacada em ${dataBR(e.data)} (${NOME_EST[i.est].toLowerCase()}), pela simulação.`;
-    legenda.textContent = `Sacada voltada para ${({ N: 'a fileira 1-3-5-7-9 (noroeste aprox.)', S: 'a fileira 2-4-6-8 (sudeste aprox.)', W: 'a rua (oeste-sudoeste aprox.)', E: 'o lado oposto à rua (leste-nordeste aprox.)' })[lado] || lado}. Planta esquemática do final ${u.final}; mancha = sol direto no piso. ${S.meta.aviso}`;
+    legenda.textContent = `Sacada voltada para ${({ N: 'o noroeste (aprox.)', S: 'o sudeste (aprox.)', /* 15/10 FILA D18b: cardinal direction, not "fileira" */ W: 'a rua (oeste-sudoeste aprox.)', E: 'o lado oposto à rua (leste-nordeste aprox.)' })[lado] || lado}. Planta esquemática do final ${u.final}; mancha = sol direto no piso. ${S.meta.aviso}`;
     estDesenhada = i.est;
     return { X, Y };
   };
