@@ -791,8 +791,23 @@ export async function ligarGoogleCena({ scene, camera, renderer, ref, aoMudar, e
   let falhou = false, mostrando = false;
   const cred = document.createElement('div'); cred.className = 'g3d-cena'; // not t360-g3d: the 360's CSS (bottom:78px) stretched it
   // compact credit in a corner (Victor 07/10: it took too much space): Google logo + data attribution, one line, top right
-  cred.style.cssText = 'position:absolute;right:8px;top:104px;z-index:5;max-width:min(58%,260px);' + CRED_CSS;
-  cred.innerHTML = htmlCredito('Cidade 3D ao redor: Google Maps · o prédio em destaque: maquete própria');
+  cred.style.cssText = 'position:absolute;right:8px;bottom:120px;z-index:5;max-width:min(58%,260px);' + CRED_CSS;
+  cred.innerHTML = htmlCredito('Cidade 3D: Google Maps · prédio em destaque: maquete própria');
+  // bottom right of the free part of the stage (the usual place, A4), above the sun bar / phone sheets and left of the
+  // docked desktop panel; at the top right it covered the sun disc on phones (15/10)
+  let credT = 0;
+  const posCred = () => {
+    const agora = performance.now(); if (agora - credT < 300) return; credT = agora;
+    const pai = renderer.domElement.parentElement.getBoundingClientRect();
+    const vis = (q) => { const e = document.querySelector(q); return e && !e.hidden && e.offsetParent !== null ? e.getBoundingClientRect() : null; };
+    let topo = pai.bottom - 30, dir = 8;
+    for (const q of ['#sol-painel', '#sol-painel .sol-dica', '#card', '#unidades']) {
+      const r = vis(q); if (!r || !r.height) continue;
+      if (innerWidth >= 1000 && (q === '#card' || q === '#unidades')) { dir = Math.max(dir, pai.right - r.left + 8); continue; }
+      topo = Math.min(topo, r.top);
+    }
+    cred.style.bottom = Math.round(pai.bottom - topo + 8) + 'px'; cred.style.right = Math.round(dir) + 'px';
+  };
   cred.hidden = true; // only while Google's city is on screen
   renderer.domElement.parentElement.appendChild(cred);
   // our city stays until Google's first view is complete; meanwhile a discreet bar (top left, under the buttons)
@@ -842,6 +857,7 @@ export async function ligarGoogleCena({ scene, camera, renderer, ref, aoMudar, e
         out.length = 0; tiles.getAttributions(out);
         const txt = textoDados(out);
         const el = cred.querySelector('.g3d-attr'); if (el.textContent !== txt) el.textContent = txt;
+        if (!cred.hidden) posCred();
         const st = tiles.stats, pend = st.queued + st.downloading + st.parsing;
         if (!mostrando) {
           if (lote0 == null) lote0 = st.loaded;
