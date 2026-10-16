@@ -6,7 +6,7 @@
 // (ESTIMATIVA): direct beam (Meinel) and diffuse horizontal; lamps at their physical power (lm / 683).
 // Same API words as src/interior.js (B4): definirHora(minutos) · definirEstacao(estacao) · definirLuz(nome, ligada).
 import * as THREE from 'three';
-import { solNoInstante } from './interior-sol.js';
+import { solNoInstante, mesmaFace, chaveUnidade } from './interior-sol.js';
 import { capacidade } from './capacidade.js';
 
 // 15/10 FILA C8: the lamps (only fixtures seen in the clips), their order and the pouf tuning come from the tour manifest
@@ -313,17 +313,17 @@ void main(){
   fatorSolUnidade(estacao, minutos) {
     const u = this.unidade, S = this.SOL;
     if (!u || !S || !S.finais || u.final == null || this.finalRender == null) return 1;
-    const fu = S.finais[String(u.final)], fr = S.finais[String(this.finalRender)];
-    if (!fu || !fr) return 1;
-    const dAng = Math.abs(((fu.sacada_aponta_graus - fr.sacada_aponta_graus + 540) % 360) - 180);
-    if (dAng > 1) return 0; // another facade: this render has no sun for it
+    const mesma = mesmaFace(S, u, this.finalRender); // C3 (16/10): unit/final keys + face test in interior-sol.js
+    if (mesma == null) return 1;
+    if (!mesma) return 0; // another facade: this render has no sun for it
     return this.cvAgora(estacao, minutos);
   }
   // sun on THIS unit's balcony at that minute (sol.json cv, same as the card), ramped over the 15-min frames
   cvAgora(estacao, minutos) {
     const u = this.unidade, S = this.SOL;
     if (!u || !S) return 0;
-    const d = S.unidades && S.unidades[u.numero] && S.unidades[u.numero].est && S.unidades[u.numero].est[estacao];
+    const ku = S.unidades ? chaveUnidade(S, u) : null; // "107" (Upper) or "<torre>-<numero>"
+    const d = ku != null && S.unidades[ku] && S.unidades[ku].est && S.unidades[ku].est[estacao];
     const e = S.estacoes && S.estacoes[estacao];
     if (!d || !e || !d.cv) return 0;
     const passo = (S.meta && S.meta.passo_min) || 15;
@@ -335,8 +335,7 @@ void main(){
   outraFace() {
     const u = this.unidade, S = this.SOL;
     if (!u || !S || !S.finais || this.finalRender == null) return false;
-    const fu = S.finais[String(u.final)], fr = S.finais[String(this.finalRender)];
-    return !!(fu && fr && Math.abs(((fu.sacada_aponta_graus - fr.sacada_aponta_graus + 540) % 360) - 180) > 1);
+    return mesmaFace(S, u, this.finalRender) === false;
   }
   plano({ estacao, minutos, luzes }) {
     const s = solNoInstante(this.SOL, estacao, minutos);

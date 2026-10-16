@@ -435,7 +435,11 @@ const FRAG_ARV_SOMBRA = /* glsl */`
 // walls (no light of their own), ground/roofs (orthophoto relit: its contact shadows were removed). ?lmk=a,b,c
 const LM_K = (() => { const m = /[?&]lmk=([\d.,]+)/.exec(typeof location !== 'undefined' ? location.search : ''); const v = m ? m[1].split(',').map(Number) : [];
   return [0, 1, 2].map((i) => (Number.isFinite(v[i]) ? v[i] : [1.0, 1.0, 1.0][i])); })();
-const B9 = (k) => !new RegExp('[?&]' + k + '=0').test(typeof location !== 'undefined' ? location.search : '');
+// 16/10 (Fabrica 3D E-L1): B9 city layers are OPTIONAL and driven by data: predio.json entorno.b9 lists the layers the city
+// step left in assets/entorno/ ('lm', 'arv9', 'fach9'; written by monta_predio.py). The lean city of Passo 5 (factory default)
+// has none -> no request for them (was 18 x 404 per load). ?lm=0 / ?arv9=0 / ?fach9=0 still switch one layer off.
+const B9_CAMADAS = Array.isArray(PREDIO_CFG.entorno.b9) ? PREDIO_CFG.entorno.b9 : [];
+const B9 = (k) => B9_CAMADAS.includes(k) && !new RegExp('[?&]' + k + '=0').test(typeof location !== 'undefined' ? location.search : '');
 function material(map, tipo) {
   return new THREE.ShaderMaterial({
     lights: true,                                    // F40: gives the shader the scene's shadow maps (no lighting is used)
