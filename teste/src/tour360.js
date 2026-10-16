@@ -11,6 +11,7 @@ import { capacidade, rebaixar } from './capacidade.js';
 import * as THREE from 'three';
 import { SOL } from './dados-sol.js';
 import { MisturaPonto, ROTULO, LUZES, INFO } from './render-mix.js';
+import { solNoInstante } from './interior-sol.js';
 
 let atual = null;
 export async function abrirTour360(opts) { if (atual) atual.fechar(false); atual = await criar(opts); return atual.api; }
@@ -24,9 +25,24 @@ export function fecharTour360() { atual?.fechar(true); }
 const NOMES_LUZ = { teto: 'Spots do teto', abajur: 'Abajures', cortineiro: 'LED da cortina', cozinha: 'Luz da cozinha' };
 const CURTO_LUZ = { teto: 'Spots', abajur: 'Abajur', cortineiro: 'LED', cozinha: 'Cozinha' }; // phone labels
 const paraMundo = ([u, v, h]) => new THREE.Vector3(-v, h, u);
+// D18c (Victor 16/10): until the client presses a lamp button, the lamps follow the hour: by day all off, at night only the
+// spots (night = sun below -2 deg, where the day/night blend of render-mix.js starts). His first press makes his set the
+// state of the visit (sessionStorage; in memory if storage is blocked): kept across hours, points, units, leaving and
+// re-entering, never changed automatically again.
+const CHAVE_LUZES = 'tabela3d-luzes-cliente';
+let luzesMemoria = null;
+function luzesDoCliente() {
+  try { const o = JSON.parse(sessionStorage.getItem(CHAVE_LUZES) || 'null'); if (o && typeof o === 'object') return o; } catch (e) { /* private mode */ }
+  return luzesMemoria;
+}
+function guardaLuzesCliente(l) { luzesMemoria = { ...l }; try { sessionStorage.setItem(CHAVE_LUZES, JSON.stringify(luzesMemoria)); } catch (e) { /* memory only */ } }
+function luzesAuto(estacao, minutos) {
+  let el = -12; try { const s = solNoInstante(SOL, estacao, minutos); if (Number.isFinite(s.el)) el = s.el; } catch (e) { /* no sun data: night */ }
+  return { teto: el < -2, abajur: false, cortineiro: false, cozinha: false };
+}
 
 async function criar({ container, manifesto = 'assets/render/tour360/manifesto.json', ponto, estacao = 'inverno', minutos = 900,
-  luzes = {}, aoFechar, teste = false, andar = null, final = null, numero = null }) {
+  luzes = null, aoFechar, teste = false, andar = null, final = null, numero = null }) {
   const man = typeof manifesto === 'string' ? await (await fetch(manifesto)).json() : manifesto;
   const base = typeof manifesto === 'string' ? manifesto.replace(/[^/]*$/, '') : (man.base || '');
   const PTS = Object.fromEntries(man.pontos.map((p) => [p.id, p]));
@@ -34,7 +50,7 @@ async function criar({ container, manifesto = 'assets/render/tour360/manifesto.j
   // first view: the middle of the room facing the balcony when it has the new render (window mask = its own exposure +
   // Google city of the unit); otherwise the first point with a window mask; the manifest order last (07/10 Victor)
   const pontoInicial = () => (man.pontos.find((p) => p.id === 'entrada' && p.camadas && p.camadas.fora) || man.pontos.find((p) => p.camadas && p.camadas.fora) || man.pontos[0]).id; // Victor 08/10: the tour starts at the entrance
-  const estado = { estacao, minutos, luzes: { ...luzes }, ponto: ponto && PTS[ponto] ? ponto : pontoInicial() };
+  const estado = { estacao, minutos, luzes: { ...(luzesDoCliente() || luzes || luzesAuto(estacao, minutos)) }, ponto: ponto && PTS[ponto] ? ponto : pontoInicial() };
   let G = null; // B10 (ON in the published site): live layer with Google Photorealistic 3D Tiles behind the `fora` window mask; null = current behaviour
 
   // ---------------------------------------------------------------- DOM
@@ -312,7 +328,8 @@ async function criar({ container, manifesto = 'assets/render/tour360/manifesto.j
   // S2 (15/10): another facade than the render's and the card says the balcony has sun now -> say so instead of faking it
   function avisoSol(e) { const a = raiz.querySelector('.t360-aviso-sol'); if (a) a.hidden = !(e.mix.outraFace() && e.mix.cvAgora(estado.estacao, estado.minutos) > 0.5); }
   function marcaLuzes() { raiz.querySelectorAll('[data-luz]').forEach((b) => b.setAttribute('aria-pressed', String(!!estado.luzes[b.dataset.luz]))); }
-  raiz.querySelectorAll('[data-luz]').forEach((b) => b.addEventListener('click', () => { estado.luzes[b.dataset.luz] = !estado.luzes[b.dataset.luz]; marcaLuzes(); repinta(); }));
+  raiz.querySelectorAll('[data-luz]').forEach((b) => b.addEventListener('click', () => { estado.luzes[b.dataset.luz] = !estado.luzes[b.dataset.luz]; guardaLuzesCliente(estado.luzes); marcaLuzes(); repinta(); }));
+  function luzesPelaHora() { if (!luzesDoCliente()) { estado.luzes = luzesAuto(estado.estacao, estado.minutos); marcaLuzes(); } } // D18c: untouched = follow the hour
   let fechado = false;
   function fechar(chamaCb = true) {
     if (fechado) return; fechado = true;
@@ -494,8 +511,8 @@ ${navigator.userAgent.slice(0, 120)}`; };
   }
 
   const api = {
-    definirHora: (m) => { estado.minutos = m; return repinta(); },
-    definirEstacao: (e) => { estado.estacao = e; return repinta(); },
+    definirHora: (m) => { estado.minutos = m; luzesPelaHora(); return repinta(); },
+    definirEstacao: (e) => { estado.estacao = e; luzesPelaHora(); return repinta(); },
     definirLuz: (n, l) => { estado.luzes[n] = !!l; marcaLuzes(); return repinta(); },
     irPara,
     olhar: (y, p = 0, f = fov) => { yaw = y; pitch = p; fov = f; aplicaCam(); desenha(); },

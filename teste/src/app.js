@@ -450,10 +450,10 @@ async function carregarInterior() {
       const t = await import('./tour360.js');
       interiorMod = {
         tour360: true,
-        // lamps on by default (same as the 3D interior), so night is never a black room
+        // D18c (Victor 16/10): lamps decided in tour360.js (by day all off, at night only the spots, client's choice kept for the visit)
         abrirInterior: (o) => t.abrirTour360({ container: o.container, manifesto: man, estacao: o.estacao, minutos: o.minutos, aoFechar: o.aoFechar, teste: o.teste,
           andar: porId.get(o.id)?.andar, final: porId.get(o.id)?.final, numero: porId.get(o.id)?.numero, // Google city + (S2) sun of the real unit
-          luzes: { teto: true, abajur: true, cortineiro: false, cozinha: false } }), // night default: spots + bedside lamps (WB neutralised in render-mix)
+        }),
         definirHora: t.definirHora, definirEstacao: t.definirEstacao, fecharInterior: t.fecharTour360,
       };
       return interiorMod;
