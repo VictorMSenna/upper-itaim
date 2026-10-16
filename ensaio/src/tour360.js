@@ -44,7 +44,7 @@ function luzesAuto(estacao, minutos) {
 }
 
 async function criar({ container, manifesto = 'assets/render/tour360/manifesto.json', ponto, estacao = 'inverno', minutos = 900,
-  luzes = null, aoFechar, teste = false, andar = null, final = null, numero = null }) {
+  luzes = null, aoFechar, teste = false, andar = null, final = null, numero = null, torre = null }) {
   const man = typeof manifesto === 'string' ? await (await fetch(manifesto)).json() : manifesto;
   const base = typeof manifesto === 'string' ? manifesto.replace(/[^/]*$/, '') : (man.base || '');
   const PTS = Object.fromEntries(man.pontos.map((p) => [p.id, p]));
@@ -124,7 +124,7 @@ async function criar({ container, manifesto = 'assets/render/tour360/manifesto.j
     const geo = new THREE.SphereGeometry(RAIO, 96, 48); geo.scale(-1, 1, 1);
     const mat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 1, depthWrite: false, toneMapped: false });
     const m = new THREE.Mesh(geo, mat); m.position.copy(paraMundo(p.pos)); m.visible = false; cena.add(m);
-    const mix = new MisturaPonto(renderer, p, base, { larguraMax, SOL, unidade: final != null && numero != null ? { numero: String(numero), andar, final } : null, finalRender: man.final ?? null, luzes: CENA.luzes, pufe: CENA.pufe });
+    const mix = new MisturaPonto(renderer, p, base, { larguraMax, SOL, unidade: final != null && numero != null ? { numero: String(numero), andar, final, torre } : null, finalRender: man.final ?? null, luzes: CENA.luzes, pufe: CENA.pufe });
     mix.pufeNoiteCena = CENA.pufe && CENA.pufe.noite; // S2: sun of THIS unit
     // 12-bit lamp low bits arrived (render-mix.js). 13/10 Victor (R2, rings at night in the kitchen): when they landed
     // during the walk to this point (estado.ponto still the old one; cached files land in < 600 ms) the repaint was
@@ -263,31 +263,48 @@ async function criar({ container, manifesto = 'assets/render/tour360/manifesto.j
     }
     precisa.sort((a, b) => a.ang - b.ang);
     const meiaFov = THREE.MathUtils.radToDeg(Math.atan(Math.tan(THREE.MathUtils.degToRad(fov / 2)) * camera.aspect));
-    const W = r.width, larg = 120;
-    let ultimoX = -1e9;
+    // 16/10 AC4 (ensaio G/H): the layout assumed every chip 120 px wide; "Porta da varanda" is ~143 px, so from the balcony
+    // its chip was pushed 4 px past the right edge of a 390 px phone and the check (and a thumb on the edge) missed it.
+    // Each chip now uses its MEASURED width (per point, measured once off-screen) for the clamp, the spacing and the packing.
+    const W = r.width;
+    let fimAnt = -1e9;
     const lista = precisa.map((c) => {
+      const w = largChip(c.id);
       let x = Math.abs(c.ang) < meiaFov ? W / 2 + (c.ang / meiaFov) * (W / 2) : (c.ang < 0 ? 0 : W);
-      x = Math.max(larg / 2 + 8, Math.min(W - larg / 2 - 8, x));
-      if (x - ultimoX < larg + 6) x = ultimoX + larg + 6;
-      ultimoX = x;
-      return { ...c, x, seta: c.ang < -12 ? '←' : c.ang > 12 ? '→' : '↓' };
+      x = Math.max(w / 2 + 8, Math.min(W - w / 2 - 8, x));
+      if (x - w / 2 < fimAnt + 6) x = fimAnt + 6 + w / 2;
+      fimAnt = x + w / 2;
+      return { ...c, x, w, seta: c.ang < -12 ? '←' : c.ang > 12 ? '→' : '↓' };
     });
     // too many for one row: keep them inside the screen, packed from the right edge back
-    for (let k = lista.length - 1; k >= 0; k--) { const lim = W - larg / 2 - 8 - (lista.length - 1 - k) * (larg + 6); if (lista[k].x > lim) lista[k].x = lim; }
+    for (let k = lista.length - 1, lim = W - 8; k >= 0; k--) { if (lista[k].x + lista[k].w / 2 > lim) lista[k].x = lim - lista[k].w / 2; lim = lista[k].x - lista[k].w / 2 - 6; }
     // a chip never sits on a ring that can be tapped: the chip row moves above it
-    for (const c of lista) for (const [ax, ay] of aneis) if (Math.abs(c.x - ax) < larg / 2 + 22 && ay > baseY - 36 - 22 && ay < baseY + 22) baseY = Math.min(baseY, ay - 28);
+    for (const c of lista) for (const [ax, ay] of aneis) if (Math.abs(c.x - ax) < c.w / 2 + 22 && ay > baseY - 36 - 22 && ay < baseY + 22) baseY = Math.min(baseY, ay - 28);
     const sig = lista.map((c) => c.id + ':' + Math.round(c.x / 8) + c.seta).join('|') + '@' + Math.round(baseY);
     if (sig === chipsSig) return;
     chipsSig = sig; chipsAtuais = lista.map((c) => ({ id: c.id, x: r.left + c.x, y: baseY }));
     chipsBox.replaceChildren(...lista.map((c) => {
-      const b = document.createElement('button'); b.type = 'button'; b.className = 't360-chip'; b.dataset.id = c.id;
+      const b = criaChip(c.id, c.seta);
       b.style.left = c.x + 'px'; b.style.top = (baseY - r.top) + 'px';
-      const i = document.createElement('i'); i.textContent = c.seta; i.setAttribute('aria-hidden', 'true');
-      b.append(...(c.seta === '→' ? [PTS[c.id].nome, i] : [i, PTS[c.id].nome]));
-      b.setAttribute('aria-label', 'Ir para ' + PTS[c.id].nome);
       b.addEventListener('click', (ev) => { ev.stopPropagation(); irPara(c.id); });
       return b;
     }));
+  }
+  function criaChip(id, seta) {
+    const b = document.createElement('button'); b.type = 'button'; b.className = 't360-chip'; b.dataset.id = id;
+    const i = document.createElement('i'); i.textContent = seta; i.setAttribute('aria-hidden', 'true');
+    b.append(...(seta === '→' ? [PTS[id].nome, i] : [i, PTS[id].nome]));
+    b.setAttribute('aria-label', 'Ir para ' + PTS[id].nome);
+    return b;
+  }
+  const largChips = new Map();
+  function largChip(id) { // CSS px of the chip of this point (the 3 arrows have about the same width; +2 px of margin)
+    let w = largChips.get(id);
+    if (w) return w;
+    const b = criaChip(id, '→'); b.style.visibility = 'hidden'; b.style.left = '-1000px'; chipsBox.append(b);
+    w = Math.ceil(b.getBoundingClientRect().width) + 2; b.remove();
+    if (!(w > 2)) return 120; // not laid out yet (hidden tour): old fixed width, measured again next time
+    largChips.set(id, w); return w;
   }
 
   // ---------------------------------------------------------------- walking between points

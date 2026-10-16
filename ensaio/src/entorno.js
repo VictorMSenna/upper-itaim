@@ -651,11 +651,14 @@ export function criarEntorno({ cena, renderer, modo = 'interior', T = null, hPis
       const ESP = arv9 ? arv9[0].especies : [{ altura_modelo: I.altura_modelo, raio_modelo: I.raio_modelo, lado: I.lado, base_frac: I.base_frac, ganho_rel: 1, cor_rel: [1, 1, 1] }];
       const tex = arv9 ? arv9[1] : await carregarTextura(BASE + 'arvores.webp', renderer);   // B7 atlas only when the B9 one is missing
       const especie = (i) => { if (ESP.length === 1) return 0; const u = ((i * 2654435761) % 4294967296) / 4294967296; return u < 0.5 ? 0 : 1 + Math.floor((u - 0.5) / 0.5 * (ESP.length - 1)) % (ESP.length - 1); };
+      // H3 16/10: an optional 10th field = species id given by the data (arvores_perto.py, the fitted street row next to the
+      // tower); it wins over the index hash, so the row keeps its species when the LiDAR list changes length
+      const idEsp = new Map(ESP.map((E, k) => [E.id, k]));
       const q = new THREE.PlaneGeometry(1, 1); q.translate(0.5, 0.5, 0);
       const g = new THREE.InstancedBufferGeometry(); g.index = q.index; g.setAttribute('position', q.attributes.position); g.setAttribute('uv', q.attributes.uv);
       const pos = new Float32Array(n * 3), dim = new Float32Array(n * 4), cor = new Float32Array(n * 3), bas = new Float32Array(n * 4);
-      L.forEach(([x, y, z, h, r, cr, cg, cb, v], i) => {
-        const k = especie(i), E = ESP[k];
+      L.forEach(([x, y, z, h, r, cr, cg, cb, v, id], i) => {
+        const k = typeof id === 'string' && idEsp.has(id) ? idEsp.get(id) : especie(i), E = ESP[k];
         const esc = h / E.altura_modelo;                       // impostor frame side in metres for this tree
         const largura = THREE.MathUtils.clamp(r / E.raio_modelo, esc * 0.7, esc * 1.4) * E.lado;   // E3: crown width follows the measured radius, never narrower than the impostor's own proportions (round crowns)
         pos.set([x, y, z], i * 3); dim.set([largura / 2, esc * E.lado, v + 3 * k, i], i * 4);

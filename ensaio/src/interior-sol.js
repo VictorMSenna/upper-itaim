@@ -35,7 +35,7 @@ export const P = { ...PL_, VB: PL_.VG + PL_.BAL };
 // balcony depth by face (B5 > medidas, B3 sol.json 14:17): north 1.10, street 1.50, south 1.20; east (finals 8, 9)
 // = window WITHOUT balcony (ESTIMATIVA of B5: the east side was barely filmed) -> "a conferir" on screen
 export const BAL_FACE = Object.fromEntries(Object.entries(PREDIO_CFG.faces).map(([k, v]) => [k, v.varanda])); // C4: predio.json faces (Upper N 1.10, W 1.50, S 1.20, E 0)
-export function configurarFace(lado) { P.BAL = BAL_FACE[lado] ?? 1.22; P.VB = P.VG + P.BAL; P.SEM_VARANDA = P.BAL < 0.05; return P; }
+export function configurarFace(lado) { P.BAL = BAL_FACE[lado] ?? PL_.BAL; P.VB = P.VG + P.BAL; P.SEM_VARANDA = P.BAL < 0.05; return P; }
 export const alturaPiso = (andar) => P.LAJE_1 + (andar - 1) * P.PISO_A_PISO;
 
 // ---------------------------------------------------------------- sun at minute t
@@ -69,18 +69,60 @@ export function solNoInstante(SOL, est, t) {
   return { est, data: e.data, nascer: e.nascer, por: e.por, t, hora: fmt(t), dia, az, el, noite, idx, dentro: f >= 0 && f <= n - 1 };
 }
 
+// ---------------------------------------------------------------- unit -> final -> face (16/10, C3: no building in code)
+// Key of a final in sol.json `finais` / predio.json `finais`: plain final ("7", Upper) or "<torre>-<final>" for buildings
+// with towers (Passo 3 writes "A-1"; predio-forma.json unidades carry `torre`). Accepts a unit object or a final.
+export function chaveFinal(SOL, un) {
+  if (un != null && typeof un === 'object') {
+    const f = String(un.final);
+    const ct = un.torre != null ? `${un.torre}-${f}` : null;
+    return ct && SOL.finais && SOL.finais[ct] ? ct : f;
+  }
+  return String(un);
+}
+// key of a unit in sol.json `unidades`: "107" (Upper) or "<torre>-<numero>" (Passo 3, towers)
+export function chaveUnidade(SOL, un) {
+  const ct = un.torre != null ? `${un.torre}-${un.numero}` : null;
+  return ct && SOL.unidades && SOL.unidades[ct] ? ct : String(un.numero);
+}
+// face of a final: side in the plan frame (N/S/W/E of predio-forma.json) + bearing the balcony points to (sol.json)
+export function faceDoFinal(SOL, chave) {
+  const fin = SOL.finais && SOL.finais[chaveFinal(SOL, chave)];
+  return fin ? { lado: fin.sacada_lado, aponta: fin.sacada_aponta_graus } : null;
+}
+// S2 (15/10): the 360 render was made for ONE unit (manifest `final` = dados/interior-planta.json unidade.final); its
+// direct sun is valid only for units whose balcony points the same way. null = unknown (caller keeps the sun).
+export function mesmaFace(SOL, un, finalRender, tolGraus = 1) {
+  if (un == null || finalRender == null) return null;
+  const fu = faceDoFinal(SOL, un), fr = faceDoFinal(SOL, finalRender);
+  if (!fu || !fr) return null;
+  return Math.abs(((fu.aponta - fr.aponta + 540) % 360) - 180) <= tolGraus;
+}
+// plan type of a final from predio.json finais[k].planta.tipo (original / espelhada / rotacionada); absent = 'falta'.
+// The base drawing is the final whose tipo is 'original' (Upper: 6).
+export function plantaDoFinal(chave, cfg = PREDIO_CFG) {
+  const fin = cfg.finais || {};
+  const pl = fin[chave] && fin[chave].planta;
+  const tipo = (pl && typeof pl === 'object' ? pl.tipo : null) || 'falta';
+  const base = Object.keys(fin).find((k) => fin[k].planta && fin[k].planta.tipo === 'original');
+  return { tipo, base: base != null ? `do final ${base}` : 'tipo' };
+}
+const rosa4 = (g) => ['norte', 'leste', 'sul', 'oeste'][Math.round((((g % 360) + 360) % 360) / 90) % 4];
+
 // ---------------------------------------------------------------- per-final transform
-// returns { M:{a,b,c,d}, t:[tx,tz], espelhado, tipo, lado, aviso }
+// returns { M:{a,b,c,d}, t:[tx,tz], espelhado, tipo, lado, aviso, chave }
 // caixa-local (x,z) = M*(u,v) + t ; inverse (u,v) = M^T*((x,z) - t)
-export function transformacao(SOL, PREDIO, final) {
-  const f = String(final);
+// 16/10 (C3): `un` = unit object ({final, torre?}) or final; plan type from predio.json (was the legacy dados/predio.json
+// text of the Upper, 2nd argument kept only for old callers and ignored).
+export function transformacao(SOL, a, b) {
+  const un = b === undefined ? a : b;
+  const f = chaveFinal(SOL, un);
   const fin = SOL.finais[f];
   const cx = fin.caixa_planta;
   const lado = fin.sacada_lado;
-  const plantaTxt = (PREDIO.finais[f] && PREDIO.finais[f].planta) || '';
-  const falta = plantaTxt.includes('[falta');
-  const espelhado = !falta && /espelh/i.test(plantaTxt);
-  const tipo = falta ? 'falta' : espelhado ? 'espelhada' : /rotac/i.test(plantaTxt) ? 'rotacionada' : 'original';
+  const { tipo, base } = plantaDoFinal(f);
+  const falta = tipo === 'falta';
+  const espelhado = tipo === 'espelhada';
   configurarFace(lado);
   let Weff, Deff;
   if (lado === 'N' || lado === 'S') { Weff = cx.largura; Deff = cx.profundidade; } else { Weff = cx.profundidade; Deff = cx.largura; }
@@ -90,11 +132,11 @@ export function transformacao(SOL, PREDIO, final) {
   else if (lado === 'N') { M = { a: -1, b: 0, c: 0, d: -1 }; t = [Weff - ou, Deff - ov]; }
   else if (lado === 'W') { M = { a: 0, b: -1, c: 1, d: 0 }; t = [Deff - ov, ou]; }
   else { M = { a: 0, b: 1, c: -1, d: 0 }; t = [ov, Weff - ou]; }
-  const semVar = P.SEM_VARANDA ? ' · janela sem varanda: a conferir (estimativa do lado leste)' : '';
-  const aviso = falta ? `[falta: planta do final ${f}] — interior montado com a planta do final 6${semVar}`
-    : tipo === 'original' ? 'Planta do final 6 (desenho do arquiteto)'
-      : `Planta do final 6 ${tipo} (nota do arquiteto)`;
-  return { M, t, espelhado, tipo, lado, aviso, caixa: cx, Weff, Deff, ajusteFora: P.VB - Deff };
+  const semVar = P.SEM_VARANDA ? ` · janela sem varanda: a conferir (estimativa do lado ${rosa4(fin.sacada_aponta_graus)})` : '';
+  const aviso = falta ? `[falta: planta do final ${f}] — interior montado com a planta ${base}${semVar}`
+    : tipo === 'original' ? `Planta ${base} (desenho do arquiteto)`
+      : `Planta ${base} ${tipo} (nota do arquiteto)`;
+  return { M, t, espelhado, tipo, lado, aviso, chave: f, caixa: cx, Weff, Deff, ajusteFora: P.VB - Deff };
 }
 export const caixaParaPlanta = (T, x, z) => {
   const dx = x - T.t[0], dz = z - T.t[1];
@@ -171,7 +213,7 @@ export function manchaAnalitica(d, { abertura = [P.G0, P.G1], espessura = true, 
 
 // B3 polygon (caixa-local metres) -> plan frame
 export function manchaB3Planta(SOL, T, final, est, idx) {
-  const m = SOL.finais[String(final)].mancha[est];
+  const m = SOL.finais[T.chave ?? chaveFinal(SOL, final)].mancha[est];
   const p = m && m[idx];
   if (!p) return [];
   return p.map(([x, z]) => caixaParaPlanta(T, x, z));

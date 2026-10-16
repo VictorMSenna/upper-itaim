@@ -15,7 +15,7 @@ import * as THREE from 'three';
 import { RectAreaLightUniformsLib } from 'three/addons/lights/RectAreaLightUniformsLib.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { SOL, VIZINHOS } from './dados-sol.js';
-import { UNIDADES, PREDIO } from './dados.js';
+import { UNIDADES } from './dados.js';
 import * as S from './interior-sol.js';
 import { fatorCeu } from './luz-curva.js';
 import { construirPlanta } from './interior-geo.js';
@@ -69,7 +69,7 @@ function criar({ id, estacao = 'inverno', minutos = 660, container, aoFechar, co
   const un = acharUnidade(id);
   if (!un) throw new Error(`abrirInterior: unidade ${id} nao encontrada`);
   if (!SOL.estacoes[estacao]) estacao = 'inverno';
-  const T = S.transformacao(SOL, PREDIO, un.final);
+  const T = S.transformacao(SOL, un); // C3 (16/10): unit -> final key + plan type from predio.json
   const dadosU = SOL.unidades[un.numero];
   const hPiso = S.alturaPiso(un.andar); // B5: slab of floor 1 at 11.92 m + 2.81 m per floor
   const planta = construirPlanta({ espelhado: T.espelhado });
@@ -104,7 +104,7 @@ function criar({ id, estacao = 'inverno', minutos = 660, container, aoFechar, co
   const $ = (s) => raiz.querySelector(s);
   const canvas = $('.int-canvas');
   $('.int-titulo strong').textContent = `Unidade ${un.numero} · ${un.andar}º andar`;
-  const sacGraus = SOL.finais[String(un.final)].sacada_aponta_graus;
+  const sacGraus = SOL.finais[T.chave].sacada_aponta_graus;
   $('.int-sub').textContent = `Sacada para ${rosa(sacGraus)} (${Math.round(sacGraus)}°) · final ${un.final}`;
   const aviso = $('.int-aviso');
   aviso.textContent = T.aviso;
@@ -713,7 +713,7 @@ function construirExterior(T, hPiso) {
   }
   let fogRef = null;
   function cenaFog(dia) { if (!fogRef && grupo.parent) fogRef = grupo.parent.fog; if (fogRef) fogRef.color.copy(cHn).lerp(cHd, dia); }
-  return { grupo, atualizar, ocultarBlocos() { chao.visible = rua.visible = viz.visible = false; }, ocultarSoBlocos() { rua.visible = viz.visible = false; }, // E1 (B1) dispose() { texDia.dispose(); texNoite.dispose(); },
+  return { grupo, atualizar, ocultarBlocos() { chao.visible = rua.visible = viz.visible = false; }, ocultarSoBlocos() { rua.visible = viz.visible = false; } /* E1 (B1) */, dispose() { texDia.dispose(); texNoite.dispose(); }, // 16/10 C3: dispose was inside the comment (TypeError on the 2nd abrirInterior)
     aquecer(r) { r.initTexture(texDia); r.initTexture(texNoite); } }; // B7: ocultarBlocos · F30 (B1): aquecer = upload both textures up front
 }
 

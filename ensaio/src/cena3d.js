@@ -878,18 +878,27 @@ export function criarCena({ container, predio, unidades, teste = false,
   // 15/10 FILA D5: an hour label of the arc is hidden while its box (+8 px) falls on a control over the stage (top chips,
   // "i", "Unidades", sun bar, legal line); on phones the "6h" sat on "Início". Rects are re-read at most every 250 ms.
   const SELETORES_SOBRE = ['.topo .marca-nome', '.topo .legenda', '#btn-foto-real', '#btn-lista', '#btn-legal', '#sol-painel', '.linha-legal'];
-  let rectsSobre = [], rectsT = 0;
+  // 16/10 AC12 (ensaio G/H): the D13 sun edge marker must also stay off every block that TAKES the tap, not only the
+  // visible chips: '.topo .marca' is a grid with pointer-events (the gaps between its chips swallow the tap; summer 12h the
+  // marker sat there on phones and could not be pressed). Only the marker reads this list; hour labels keep SELETORES_SOBRE.
+  const SELETORES_SOBRE_BORDA = ['.topo .marca', '.barra'];
+  let rectsSobre = [], rectsBorda = [], rectsT = 0;
   const vRot = new THREE.Vector3();
   function lerRectsSobre() {
     rectsT = performance.now();
     const c = canvas.getBoundingClientRect();
-    rectsSobre = [];
-    for (const s of SELETORES_SOBRE) {
-      const e = document.querySelector(s);
-      if (!e || e.hidden || e.offsetParent === null) continue;
-      const r = e.getBoundingClientRect();
-      if (r.width > 0 && r.height > 0) rectsSobre.push([r.left - c.left - 8, r.top - c.top - 8, r.right - c.left + 8, r.bottom - c.top + 8]);
-    }
+    const le = (lista) => {
+      const out = [];
+      for (const s of lista) {
+        const e = document.querySelector(s);
+        if (!e || e.hidden || e.offsetParent === null) continue;
+        const r = e.getBoundingClientRect();
+        if (r.width > 0 && r.height > 0) out.push([r.left - c.left - 8, r.top - c.top - 8, r.right - c.left + 8, r.bottom - c.top + 8]);
+      }
+      return out;
+    };
+    rectsSobre = le(SELETORES_SOBRE);
+    rectsBorda = rectsSobre.concat(le(SELETORES_SOBRE_BORDA));
   }
   function rotulosForaDosBotoes() {
     if (!rotulosHora.length || !arco.visible) return;
@@ -965,7 +974,7 @@ export function criarCena({ container, predio, unidades, teste = false,
     vBorda.applyMatrix4(camera.projectionMatrix);
     let sx = (vBorda.x * 0.5 + 0.5) * largura, sy = (-vBorda.y * 0.5 + 0.5) * altura;
     const m = 22, W = largura - desloc.x, Hh = altura - desloc.y;
-    const tapa = (x, y) => rectsSobre.some(([a, b, c, d]) => x > a && x < c && y > b && y < d);
+    const tapa = (x, y) => rectsBorda.some(([a, b, c, d]) => x > a && x < c && y > b && y < d); // AC12: + blocks that take the tap
     if (!atras && sx > m && sx < W - m && sy > m && sy < Hh - m && !tapa(sx, sy)) { solBorda.hidden = true; return; }
     const cx = W / 2, cy = Hh / 2;
     let dx, dy, px, py, ux, uy;

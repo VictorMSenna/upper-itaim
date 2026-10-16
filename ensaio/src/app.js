@@ -541,7 +541,7 @@ async function carregarInterior() {
         tour360: true,
         // D18c (Victor 16/10): lamps decided in tour360.js (by day all off, at night only the spots, client's choice kept for the visit)
         abrirInterior: (o) => t.abrirTour360({ container: o.container, manifesto: man, estacao: o.estacao, minutos: o.minutos, aoFechar: o.aoFechar, teste: o.teste,
-          andar: porId.get(o.id)?.andar, final: porId.get(o.id)?.final, numero: porId.get(o.id)?.numero, // Google city + (S2) sun of the real unit
+          andar: porId.get(o.id)?.andar, final: porId.get(o.id)?.final, numero: porId.get(o.id)?.numero, torre: porId.get(o.id)?.torre, // Google city + (S2) sun of the real unit
         }),
         definirHora: t.definirHora, definirEstacao: t.definirEstacao, fecharInterior: t.fecharTour360,
       };

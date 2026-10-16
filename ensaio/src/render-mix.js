@@ -6,7 +6,7 @@
 // (ESTIMATIVA): direct beam (Meinel) and diffuse horizontal; lamps at their physical power (lm / 683).
 // Same API words as src/interior.js (B4): definirHora(minutos) · definirEstacao(estacao) · definirLuz(nome, ligada).
 import * as THREE from 'three';
-import { solNoInstante } from './interior-sol.js';
+import { solNoInstante, mesmaFace, chaveUnidade } from './interior-sol.js';
 import { capacidade } from './capacidade.js';
 
 // 15/10 FILA C8: the lamps (only fixtures seen in the clips), their order and the pouf tuning come from the tour manifest
@@ -55,6 +55,7 @@ uniform sampler2D tL0; uniform sampler2D tL1; uniform sampler2D tL2;
 #endif
 // lit walls between joelho and joelho2 (log up to y2), the lamps themselves above joelho2 (log from y2 up to ymax)
 vec3 decod(vec3 v, float kn, float kn2, float yb, float ym, float gL){
+  v = max(v, vec3(0.0)); // 16/10 CEU-PRETO: pow() of a negative code is NaN on ANGLE/D3D (black pixel) - never feed it one
   if (kn <= 0.0) return pow(v, vec3(gama));
   vec3 baixo = pow(min(v / kn, 1.0), vec3(gL)); // per-layer gamma (lamps 3.0: more codes for dark surfaces)
   vec3 meio = exp(clamp(v - kn, 0.0, kn2 - kn) / (kn2 - kn) * log(yb));
@@ -74,7 +75,9 @@ vec3 deband(sampler2D tx, vec2 uv, vec3 c){
   vec2 o = vec2(cos(a), sin(a)) * r, p = vec2(-o.y, o.x);
   vec3 s1 = texture2D(tx, uv + o).rgb, s2 = texture2D(tx, uv - o).rgb, s3 = texture2D(tx, uv + p).rgb, s4 = texture2D(tx, uv - p).rgb;
   vec3 d = max(max(abs(s1 - c), abs(s2 - c)), max(abs(s3 - c), abs(s4 - c)));
-  vec3 m = (c + s1 + s2 + s3 + s4) * 0.2 + (hDb(uv * 3071.0 + 3.3) - 0.5) / 255.0;
+  // 16/10 CEU-PRETO (varanda by day: sky black with rows of dots): the +-0.5-code grain made pure-black texels (the sky of
+  // the solind layers is 0) NEGATIVE for half the pixels -> pow(<0) = NaN in decod -> the whole sum went black. Clamp at 0.
+  vec3 m = max((c + s1 + s2 + s3 + s4) * 0.2 + (hDb(uv * 3071.0 + 3.3) - 0.5) / 255.0, vec3(0.0));
   return mix(m, c, step(dbT, max(d.r, max(d.g, d.b))));
 }
 // 08/10 local adaptation (Victor: noon highlights blown at the entrance; room too dark seen from the balcony door): a blurred
@@ -313,17 +316,17 @@ void main(){
   fatorSolUnidade(estacao, minutos) {
     const u = this.unidade, S = this.SOL;
     if (!u || !S || !S.finais || u.final == null || this.finalRender == null) return 1;
-    const fu = S.finais[String(u.final)], fr = S.finais[String(this.finalRender)];
-    if (!fu || !fr) return 1;
-    const dAng = Math.abs(((fu.sacada_aponta_graus - fr.sacada_aponta_graus + 540) % 360) - 180);
-    if (dAng > 1) return 0; // another facade: this render has no sun for it
+    const mesma = mesmaFace(S, u, this.finalRender); // C3 (16/10): unit/final keys + face test in interior-sol.js
+    if (mesma == null) return 1;
+    if (!mesma) return 0; // another facade: this render has no sun for it
     return this.cvAgora(estacao, minutos);
   }
   // sun on THIS unit's balcony at that minute (sol.json cv, same as the card), ramped over the 15-min frames
   cvAgora(estacao, minutos) {
     const u = this.unidade, S = this.SOL;
     if (!u || !S) return 0;
-    const d = S.unidades && S.unidades[u.numero] && S.unidades[u.numero].est && S.unidades[u.numero].est[estacao];
+    const ku = S.unidades ? chaveUnidade(S, u) : null; // "107" (Upper) or "<torre>-<numero>"
+    const d = ku != null && S.unidades[ku] && S.unidades[ku].est && S.unidades[ku].est[estacao];
     const e = S.estacoes && S.estacoes[estacao];
     if (!d || !e || !d.cv) return 0;
     const passo = (S.meta && S.meta.passo_min) || 15;
@@ -335,8 +338,7 @@ void main(){
   outraFace() {
     const u = this.unidade, S = this.SOL;
     if (!u || !S || !S.finais || this.finalRender == null) return false;
-    const fu = S.finais[String(u.final)], fr = S.finais[String(this.finalRender)];
-    return !!(fu && fr && Math.abs(((fu.sacada_aponta_graus - fr.sacada_aponta_graus + 540) % 360) - 180) > 1);
+    return mesmaFace(S, u, this.finalRender) === false;
   }
   plano({ estacao, minutos, luzes }) {
     const s = solNoInstante(this.SOL, estacao, minutos);
