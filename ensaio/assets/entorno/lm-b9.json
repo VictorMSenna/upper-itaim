@@ -1,0 +1,11 @@
+{
+ "versao": "enxuto-2026-10-16",
+ "topo_box": [
+  7.6699999999999875,
+  20.99000000000001,
+  422.99
+ ],
+ "refT": 0.7868737578392029,
+ "refP": 0,
+ "nota": "lean city (Passo 5 enxuto): ground sky light = horizon-scan visibility of the topo mesh + tower, CPU, no bounce; stored sqrt(lm/2); walls neutral (no wall bake); lm_topo_enxuto.py"
+}

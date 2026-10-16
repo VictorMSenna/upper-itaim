@@ -418,7 +418,9 @@
     "nota": "vista reconstruída a partir de imagens de drone (abril/2026) e do mapa 3D da Prefeitura",
     "extensaoFachadas_m": 2048,
     "extensaoRuas_m": 409.6,
-    "b9": []
+    "b9": [
+      "lm"
+    ]
   },
   "cartao": {
     "destaque": null,
