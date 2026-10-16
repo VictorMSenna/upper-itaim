@@ -585,7 +585,7 @@ export class VistaGoogle {
   montaCredito() {
     const d = document.createElement('div');
     d.className = 't360-g3d';
-    d.innerHTML = htmlCredito('Cidade vista da janela e reflexo no vidro: Google Maps · apartamento: imagem ilustrativa própria');
+    d.innerHTML = htmlCredito('Vista da janela e reflexo: Google Maps · apartamento: render ilustrativo');
     // discreet progress, a separate element (tour360 places it on the left, the credit sits small on the right)
     this.carga = document.createElement('div'); this.carga.className = 't360-g3d-carga'; this.carga.hidden = true;
     this.carga.innerHTML = '<span>Montando a vista real da cidade</span><i><b></b></i>';

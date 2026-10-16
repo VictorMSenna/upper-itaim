@@ -77,6 +77,7 @@ async function criar({ container, manifesto = 'assets/render/tour360/manifesto.j
     .t360-chip i{font-style:normal;font-size:14px;opacity:.85}
     .t360-aviso-sol{position:absolute;left:50%;top:104px;transform:translateX(-50%);width:max-content;max-width:min(86%,420px);padding:6px 10px;border-radius:10px;background:rgba(16,18,17,.78);color:#f4d48a;font:11.5px/1.3 system-ui,sans-serif;text-align:center;pointer-events:none;z-index:4}
     .t360-aviso-sol[hidden]{display:none}
+    @media (max-width:760px){.t360-aviso-sol{top:200px}}
     .t360-fechar{position:absolute;right:12px;top:12px;width:36px;height:36px;border-radius:50%;border:0;background:rgba(0,0,0,.55);color:#fff;font-size:22px;cursor:pointer}`;
     document.head.appendChild(css);
   }
@@ -229,13 +230,13 @@ async function criar({ container, manifesto = 'assets/render/tour360/manifesto.j
     for (const d of document.querySelectorAll('#interior-sol .sol-dica')) if (!d.hidden && d.offsetParent !== null) baseY = Math.min(baseY, d.getBoundingClientRect().top - 6); // the 'segure' hint sits above the bar
     { const ri = raiz.querySelector('.t360-rot'); if (ri && ri.offsetParent !== null) { const q = ri.getBoundingClientRect(); if (q.bottom > baseY - 40) baseY = Math.min(baseY, q.top - 6); } } // and the 'i' of the image
     camera.getWorldDirection(vF); vF.y = 0; vF.normalize();
-    const precisa = [];
+    const precisa = [], aneis = [];
     for (const m of grupoHot.children) {
       vC.copy(m.position).project(camera);
       const x = r.left + (vC.x * 0.5 + 0.5) * r.width, y = r.top + (-vC.y * 0.5 + 0.5) * r.height, R2 = 22;
       const naTela = vC.z < 1 && x > r.left + 24 && x < r.right - 24 && y > r.top + 24 && y < r.bottom - 24;
       const tapado = tampas.some((q) => x + R2 > q.left && x - R2 < q.right && y + R2 > q.top && y - R2 < q.bottom);
-      if (naTela && !tapado) continue;
+      if (naTela && !tapado) { aneis.push([x - r.left, y]); continue; }
       vD.copy(m.position).sub(camera.position); vD.y = 0;
       const ang = THREE.MathUtils.radToDeg(Math.atan2(vD.x * -vF.z + vD.z * vF.x, vD.x * vF.x + vD.z * vF.z)); // + = to the right
       precisa.push({ id: m.userData.id, ang });
@@ -253,6 +254,8 @@ async function criar({ container, manifesto = 'assets/render/tour360/manifesto.j
     });
     // too many for one row: keep them inside the screen, packed from the right edge back
     for (let k = lista.length - 1; k >= 0; k--) { const lim = W - larg / 2 - 8 - (lista.length - 1 - k) * (larg + 6); if (lista[k].x > lim) lista[k].x = lim; }
+    // a chip never sits on a ring that can be tapped: the chip row moves above it
+    for (const c of lista) for (const [ax, ay] of aneis) if (Math.abs(c.x - ax) < larg / 2 + 22 && ay > baseY - 36 - 22 && ay < baseY + 22) baseY = Math.min(baseY, ay - 28);
     const sig = lista.map((c) => c.id + ':' + Math.round(c.x / 8) + c.seta).join('|') + '@' + Math.round(baseY);
     if (sig === chipsSig) return;
     chipsSig = sig; chipsAtuais = lista.map((c) => ({ id: c.id, x: r.left + c.x, y: baseY }));
@@ -362,7 +365,7 @@ async function criar({ container, manifesto = 'assets/render/tour360/manifesto.j
       const geo = new THREE.SphereGeometry(RAIO, 96, 48); geo.scale(-1, 1, 1);
       const malha = new THREE.Mesh(geo, mat); malha.renderOrder = 3; malha.visible = false; malha.frustumCulled = false; cena.add(malha);
       const st = document.createElement('style'); st.id = 't360-g3d-css';
-      st.textContent = '.t360-g3d{position:absolute;right:10px;bottom:78px;max-width:min(58%,300px);display:flex;flex-direction:column;align-items:flex-start;gap:3px;padding:10px 10px 5px;border-radius:8px;background:rgba(0,0,0,.5);color:#fff;font:10px/1.25 system-ui,sans-serif;pointer-events:none;white-space:normal;overflow:visible}.t360-g3d[hidden]{display:none}.t360-g3d img{height:21px;width:auto;display:block;flex:none}.t360-g3d-carga{position:absolute;left:12px;bottom:78px;width:160px;display:flex;flex-direction:column;gap:3px;padding:4px 8px;border-radius:7px;background:rgba(0,0,0,.45);color:#fff;font:10px/1.2 system-ui,sans-serif;pointer-events:none}.t360-g3d-carga[hidden]{display:none}.t360-g3d-carga i{display:block;height:2px;border-radius:2px;background:rgba(255,255,255,.25);overflow:hidden}.t360-g3d-carga b{display:block;height:100%;width:4%;background:#fff;transition:width .4s ease}';
+      st.textContent = '.t360-g3d{position:absolute;right:10px;bottom:78px;max-width:min(58%,300px);display:flex;flex-direction:column;align-items:flex-start;gap:3px;padding:10px 10px 5px;border-radius:8px;background:rgba(0,0,0,.5);color:#fff;font:10px/1.25 system-ui,sans-serif;pointer-events:none;white-space:normal;overflow:visible}.t360-g3d[hidden]{display:none}.t360-g3d img{height:21px;width:auto;display:block;flex:none}@media (max-width:760px){.t360-g3d{top:92px;bottom:auto!important;max-width:min(70%,300px)}.t360-g3d-carga{top:92px;bottom:auto!important;width:130px!important}}.t360-g3d-carga{position:absolute;left:12px;bottom:78px;width:160px;display:flex;flex-direction:column;gap:3px;padding:4px 8px;border-radius:7px;background:rgba(0,0,0,.45);color:#fff;font:10px/1.2 system-ui,sans-serif;pointer-events:none}.t360-g3d-carga[hidden]{display:none}.t360-g3d-carga i{display:block;height:2px;border-radius:2px;background:rgba(255,255,255,.25);overflow:hidden}.t360-g3d-carga b{display:block;height:100%;width:4%;background:#fff;transition:width .4s ease}';
       document.head.appendChild(st); raiz.appendChild(vista.credito); raiz.appendChild(vista.carga);
       const dir = new THREE.Vector3(), tam = new THREE.Vector2(), perf = { n: 0, ms: 0, max: 0 }, camV = new THREE.PerspectiveCamera();
       let atual = null, falhou = false;
