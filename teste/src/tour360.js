@@ -440,7 +440,7 @@ async function criar({ container, manifesto = 'assets/render/tour360/manifesto.j
             const op = vista.opacidade(); mat.uniforms.forca.value = op; if (op < 1) vista.acordar(); // keep frames coming during the fade
             vista.credito.hidden = op <= 0; // the credit shows only while Google's city is on screen
             // credit + progress sit just above the image caption (the sun bar below would hide them)
-            if ((perf.n & 31) === 0) { const rot = raiz.querySelector('.t360-rot'); const topo = rot && rot.offsetParent ? rot.getBoundingClientRect().top : innerHeight - 120; const bb = Math.max(78, Math.round(raiz.getBoundingClientRect().bottom - topo + 6)) + 'px'; vista.credito.style.bottom = bb; vista.carga.style.bottom = bb; }
+            if ((perf.n & 31) === 0) { const rot = raiz.querySelector('.t360-rot'); const topo = Math.min(rot && rot.offsetParent ? rot.getBoundingClientRect().top : innerHeight - 120, ...[...raiz.querySelectorAll('.t360-chip')].map((c) => c.getBoundingClientRect().top)); /* 15/10: the Google credit never under a chip */ const bb = Math.max(78, Math.round(raiz.getBoundingClientRect().bottom - topo + 6)) + 'px'; vista.credito.style.bottom = bb; vista.carga.style.bottom = bb; }
             mat.uniforms.tG.value = vista.rt.texture; mat.uniforms.res.value.copy(tam);
             const dt = performance.now() - t0; perf.n++; perf.ms += dt; perf.max = Math.max(perf.max, dt);
             if (window.__g3d && window.__g3d.erro && /403|429|quota|key|denied|permission/i.test(window.__g3d.erro)) throw new Error(window.__g3d.erro);
@@ -462,7 +462,7 @@ async function criar({ container, manifesto = 'assets/render/tour360/manifesto.j
             vista.progressoFoto(true); // the bar stays while the picture is being made, wherever the visitor looks (Victor 08/10)
             const op = vista.opacidade(); mat.uniforms.forca.value = op; if (op < 1 && malha.visible) vista.acordar();
             vista.credito.hidden = !malha.visible || op <= 0;
-            if ((perf.n++ & 31) === 0) { const rot = raiz.querySelector('.t360-rot'); const topo = rot && rot.offsetParent ? rot.getBoundingClientRect().top : innerHeight - 120; const bb = Math.max(78, Math.round(raiz.getBoundingClientRect().bottom - topo + 6)) + 'px'; vista.credito.style.bottom = bb; vista.carga.style.bottom = bb; }
+            if ((perf.n++ & 31) === 0) { const rot = raiz.querySelector('.t360-rot'); const topo = Math.min(rot && rot.offsetParent ? rot.getBoundingClientRect().top : innerHeight - 120, ...[...raiz.querySelectorAll('.t360-chip')].map((c) => c.getBoundingClientRect().top)); /* 15/10: the Google credit never under a chip */ const bb = Math.max(78, Math.round(raiz.getBoundingClientRect().bottom - topo + 6)) + 'px'; vista.credito.style.bottom = bb; vista.carga.style.bottom = bb; }
             if (window.__g3d && window.__g3d.erro && /403|429|quota|key|denied|permission/i.test(window.__g3d.erro)) throw new Error(window.__g3d.erro);
           } catch (err) { falhou = true; malha.visible = false; vista.credito.hidden = true; try { vista.liberar(); } catch (e2) { /* ignore */ } console.warn('google3d desligado', err && err.message); }
         },

@@ -233,6 +233,7 @@ body.painel-aberto .chip-lista, body.vista-foto .chip-lista { display: none; }
 .sol-ctl.andando .sol-btn { box-shadow: 0 0 0 4px rgba(244,196,90,.35); }
 .sol-relogio { display: grid; line-height: 1.05; flex: none; min-width: 0; max-width: 118px; } /* F32: more track for the hour */
 @media (min-width: 1000px) { .sol-relogio { max-width: 250px; } } /* 15/10 FILA D6: "Inverno · 21/06 · nasce 06:47 · põe 17:28" whole; the track keeps min 140 px */
+@media (min-width: 1000px) and (max-width: 1279px) { .sol-relogio { max-width: 150px; } .sol-sub { white-space: normal; line-height: 1.2; } } /* 1024 with the panel open: 2 lines, the hour track keeps its width */
 .sol-ctl.fino .sol-range::-webkit-slider-thumb { box-shadow: 0 0 0 6px rgba(244,196,90,.45); } /* F32b: fine mode */
 .sol-hora { font: 600 22px var(--f-mono); letter-spacing: -.03em; }
 .sol-sub { font-size: 10.5px; color: rgba(241,237,230,.66); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
