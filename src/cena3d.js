@@ -1286,7 +1286,10 @@ export function criarCena({ container, predio, unidades, teste = false,
     const dSol = sombraUlt ? Math.hypot(i.az - sombraUlt.az, i.el - sombraUlt.el) : 99;
     if (!movendo || dSol > 0.5) { renderer.shadowMap.needsUpdate = true; sombraUlt = { az: i.az, el: i.el }; }
     if (enquadrar) enquadrarSol(true); // F33: only on an explicit request
-    if (primeiro) enquadrarInicial(); // D12: start view only (once, before any gesture)
+    // 16/10 01h (R-VISTA, Victor: the reference is the previous live version ae1eb00): the start view is again the fixed
+    // 'Inicio' view (VISTAS.inicio, same as the Inicio button). The D12 sun-driven start pose put a big Google building in
+    // the foreground on phones and was never approved; it stays only behind ?inicioSol=1 for comparison. D13 edge marker kept.
+    if (primeiro && /[?&]inicioSol=1/.test(location.search)) enquadrarInicial(); // D12 (off by default)
     if (mudouFlags || (luzesAntes > 0.01) !== (solEstado.luzes > 0.01)) pintar();
     else { matUnidNoite.opacity = solEstado.luzes; if (meshListras) meshListras.material.opacity = (estado.andar != null ? 0.6 : 1) * (1 - solEstado.luzes); pedirRender(); }
   }
