@@ -55,6 +55,7 @@ uniform sampler2D tL0; uniform sampler2D tL1; uniform sampler2D tL2;
 #endif
 // lit walls between joelho and joelho2 (log up to y2), the lamps themselves above joelho2 (log from y2 up to ymax)
 vec3 decod(vec3 v, float kn, float kn2, float yb, float ym, float gL){
+  v = max(v, vec3(0.0)); // 16/10 CEU-PRETO: pow() of a negative code is NaN on ANGLE/D3D (black pixel) - never feed it one
   if (kn <= 0.0) return pow(v, vec3(gama));
   vec3 baixo = pow(min(v / kn, 1.0), vec3(gL)); // per-layer gamma (lamps 3.0: more codes for dark surfaces)
   vec3 meio = exp(clamp(v - kn, 0.0, kn2 - kn) / (kn2 - kn) * log(yb));
@@ -74,7 +75,9 @@ vec3 deband(sampler2D tx, vec2 uv, vec3 c){
   vec2 o = vec2(cos(a), sin(a)) * r, p = vec2(-o.y, o.x);
   vec3 s1 = texture2D(tx, uv + o).rgb, s2 = texture2D(tx, uv - o).rgb, s3 = texture2D(tx, uv + p).rgb, s4 = texture2D(tx, uv - p).rgb;
   vec3 d = max(max(abs(s1 - c), abs(s2 - c)), max(abs(s3 - c), abs(s4 - c)));
-  vec3 m = (c + s1 + s2 + s3 + s4) * 0.2 + (hDb(uv * 3071.0 + 3.3) - 0.5) / 255.0;
+  // 16/10 CEU-PRETO (varanda by day: sky black with rows of dots): the +-0.5-code grain made pure-black texels (the sky of
+  // the solind layers is 0) NEGATIVE for half the pixels -> pow(<0) = NaN in decod -> the whole sum went black. Clamp at 0.
+  vec3 m = max((c + s1 + s2 + s3 + s4) * 0.2 + (hDb(uv * 3071.0 + 3.3) - 0.5) / 255.0, vec3(0.0));
   return mix(m, c, step(dbT, max(d.r, max(d.g, d.b))));
 }
 // 08/10 local adaptation (Victor: noon highlights blown at the entrance; room too dark seen from the balcony door): a blurred
