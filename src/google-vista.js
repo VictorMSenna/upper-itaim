@@ -1,22 +1,50 @@
-// Optional live layer (front B10, LOCAL TEST ONLY): the city seen through the windows of the 360 tour comes from Google
+// Live layer (front B10, ON in the published site since 07/10; ?google3d=0 turns it off): the city seen through the windows of the 360 tour comes from Google
 // Photorealistic 3D Tiles (Map Tiles API), rendered with a three.js camera standing where the panorama was taken.
 //
 // Rules from the Google terms (briefing pacote-google-3d-tiles.md): Google logo + aggregated attribution on screen, say
 // "Cidade: Google", no storing of tiles (only the in-memory renderer cache), no extraction, Google's mesh is never hidden or
-// clipped (our model is only drawn OVER it). Everything here is optional: no key / any error / quota hit / trial ended =>
+// clipped (our model is only drawn OVER it) [15/10 note: the tower/lot cut in the outside view is under review by the
+// Google-terms front, audit A R5]. Everything here is optional: no key / any error / quota hit / trial ended =>
 // `iniciarGoogle()` resolves false and the tour keeps its current look, with no message to the visitor.
 //
-// The key is NEVER in a file: it is read from window.__G3D_KEY (injected by the test harness) or ?gkey= on the URL.
+// The key is NEVER in the project source: window.__G3D_KEY (local test harness), ?gkey= (tests), else src/g3d-chave.js, which
+// exists ONLY in the published copies (written by docs/b10-scripts/prepara_pages.py / prepara_teste.py, site key restricted by referrer).
 import * as THREE from 'three';
 import { capacidade } from './capacidade.js';
+import { chaveLocal, PREDIO_CFG } from './predio.js';
 import { smooth, fatorDia, fatorLuzesNoite } from './luz-curva.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 
 const V = '3d-tiles-renderer@0.5.3'; // pinned
-const CDN = `https://cdn.jsdelivr.net/npm/${V}/build/`;
-const DRACO = 'https://cdn.jsdelivr.net/npm/three@0.186.1/examples/jsm/libs/draco/gltf/';
-const LOGO = 'https://maps.gstatic.com/mapfiles/api-3/images/google_white5_hdpi.png';
+// 15/10 FILA C5: the libraries are copies in src/vendor (docs/b10-scripts/vendoriza.py), same versions as the old CDN links
+const CDN = new URL(`./vendor/${V}/build/`, import.meta.url).href;
+const DRACO = new URL('./vendor/three@0.186.1/examples/jsm/libs/draco/gltf/', import.meta.url).href;
+// 15/10 (Google terms, G1-TERMOS A4): the official "Google Maps" logo (Google_Maps_Attribution_Assets.zip, outlined version for a
+// busy background, unmodified) replaces the old "Google" logo; shown 21 px tall = the logo itself ~17 px (min 16, max 19 dp)
+// plus its outline; accessibility label "Google Maps"; clear space 10/10/10/5 px; data attribution in full (no ellipsis),
+// as the plugin aggregates it (sorted by occurrences, ';'), after "Dados do mapa:"; and a line that says WHICH part of the
+// scene is Google's (hybrid-scene rule). The grey-zone uses (window photo, reflection, night grade, tower cut) are unchanged.
+const LOGO = 'assets/marca/google-maps-logo-contorno-escuro.svg';
+// 15/10 22h wave 1 (Victor: the box was too big, it covered the lower floors and the top of the 360): compact box. Logo
+// unchanged (21 px, logo ~17 px + outline, clear space 10 px left/top/right and to the text, 5 px under it); the
+// which-part line sits BESIDE the logo (2 short lines in the logo's height) and the data attribution, in full, runs under
+// both (phones) or on the same line (>= 1000 px). Class .g3d-cred, CSS injected once (estiloCredito).
+const CRED_CSS = 'pointer-events:none;overflow:visible';
+const CRED_ESTILO = '.g3d-cred{display:grid;grid-template-columns:auto minmax(0,auto);column-gap:10px;row-gap:3px;align-items:center;padding:10px 10px 5px;border-radius:8px;background:rgba(0,0,0,.5);color:#fff;font:9px/1.2 system-ui,sans-serif;white-space:normal;box-sizing:border-box}'
+  + '.g3d-cred img{height:21px;width:auto;display:block;grid-row:1;grid-column:1}.g3d-cred .g3d-parte{grid-row:1;grid-column:2;font-weight:600}'
+  + '.g3d-cred .g3d-attr{grid-row:2;grid-column:1/-1;opacity:.92}.g3d-cred .g3d-attr:empty{display:none}'
+  + '@media (min-width:1000px){.g3d-cred{grid-template-columns:auto auto auto;font-size:10px}.g3d-cred .g3d-attr{grid-row:1;grid-column:3}}';
+export function estiloCredito() {
+  if (typeof document === 'undefined' || document.getElementById('g3d-cred-css')) return;
+  const st = document.createElement('style'); st.id = 'g3d-cred-css'; st.textContent = CRED_ESTILO; document.head.appendChild(st);
+}
+export function htmlCredito(parte) {
+  estiloCredito();
+  return '<img alt="Google Maps" aria-label="Google Maps" src="' + LOGO + '" referrerpolicy="no-referrer">'
+    + '<span class="g3d-parte">' + parte + '</span><span class="g3d-attr"></span>';
+}
+export const textoDados = (out) => { const t = out.filter((a) => a.type === 'string' && a.value).map((a) => a.value).join('; '); return t ? 'Dados do mapa: ' + t : ''; };
 
 // detail level: ?gerr=<px> sets the 360 target, the outside view uses 1.25x
 // detail per device tier (src/capacidade.js): 8 px = Google's finest on computers and top phones, 24/28 on mid phones
@@ -38,7 +66,9 @@ const FOTO_MB = (+(typeof location !== 'undefined' && new URLSearchParams(locati
 const FOTO_N = +(typeof location !== 'undefined' && new URLSearchParams(location.search).get('gfn')) || (capacidade().nivel === 'topo' ? 4 : 2); // regions per face side (mid phones: 2x2 at the lower detail)
 export const desligadoPorUrl = () => /[?&]google3d=0/.test(location.search);
 async function chaveDaPagina() {
-  const k = window.__G3D_KEY || new URLSearchParams(location.search).get('gkey');
+  // 15/10 FILA C6: ?gkey= only on localhost/127.0.0.1 (on the public domain a pasted key in a link is ignored)
+  const local = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname);
+  const k = window.__G3D_KEY || (local ? new URLSearchParams(location.search).get('gkey') : null);
   if (k) return k;
   try { return (await import('./g3d-chave.js')).CHAVE || ''; } catch (e) { return ''; }
 }
@@ -234,7 +264,7 @@ export function iniciarGoogle() {
       };
       s.shaderRecorte = shaderRecorte;
       // facade orientation of our city's walls (+-2048 m around the B5 origin): straight window rows at night (LUZ_GLSL)
-      new THREE.TextureLoader().load('assets/entorno/fachadas-angulo.webp', (t) => { t.colorSpace = THREE.NoColorSpace; t.minFilter = t.magFilter = THREE.LinearFilter; t.generateMipmaps = false; s.recorte.ang.value = t; s.recorte.angExt.value = 2048; }, undefined, () => { /* optional: old per-triangle grid */ });
+      new THREE.TextureLoader().load('assets/entorno/fachadas-angulo.webp', (t) => { t.colorSpace = THREE.NoColorSpace; t.minFilter = t.magFilter = THREE.LinearFilter; t.generateMipmaps = false; s.recorte.ang.value = t; s.recorte.angExt.value = PREDIO_CFG.entorno.extensaoFachadas_m; /* C9: predio.json (+-2048 m on the Upper) */ }, undefined, () => { /* optional: old per-triangle grid */ });
       const recortar = (o) => {
         if (!o.isMesh || !o.material || o.material.__recorte) return;
         const m = o.material; m.__recorte = true;
@@ -433,7 +463,7 @@ export class VistaGoogle {
       F.dirsVistos = this.dirs;
       const falta = this.facesDaJanela().filter((f) => !F.faces.includes(f)).slice(0, 4 - F.faces.length);
       if (falta.length) {
-        if (F.feito) { F.i = F.faces.length; F.reg = 0; F.fila = null; F.t0 = agora; F.feito = false; this.restauraCache(); const c = this.s.tiles.lruCache; this._guardaCache(); c.minBytesSize = 0; c.unloadPercent = 1; c.maxBytesSize = Math.max(c.maxBytesSize, FOTO_MB); try { localStorage.setItem('tabela3d-foto-ativa', String(Date.now())); } catch (e) { /* ignore */ } }
+        if (F.feito) { F.i = F.faces.length; F.reg = 0; F.fila = null; F.t0 = agora; F.feito = false; this.restauraCache(); const c = this.s.tiles.lruCache; this._guardaCache(); c.minBytesSize = 0; c.unloadPercent = 1; c.maxBytesSize = Math.max(c.maxBytesSize, FOTO_MB); try { localStorage.setItem(chaveLocal('tabela3d-foto-ativa'), String(Date.now())); } catch (e) { /* ignore */ } }
         for (const f of falta) { F.faces.push(f); F.alvos.push({ A: alvo(FOTO_LADO), W: alvo(FOTO_LADO_W) }); F.mats.push(new THREE.Matrix4().multiplyMatrices(F.cams[f].projectionMatrix, F.cams[f].matrixWorldInverse)); }
       }
     }
@@ -445,8 +475,8 @@ export class VistaGoogle {
       F.alvos = F.faces.map(() => ({ A: alvo(FOTO_LADO), W: alvo(FOTO_LADO_W) }));
       F.mats = F.faces.map((f) => new THREE.Matrix4().multiplyMatrices(F.cams[f].projectionMatrix, F.cams[f].matrixWorldInverse));
       F.limpos = new Set();
-      try { localStorage.setItem('tabela3d-foto-ativa', String(Date.now())); } catch (e) { /* private mode */ } // crash guard (capacidade.js)
-      if (!window.__g3dSaida) { window.__g3dSaida = true; addEventListener('pagehide', () => { try { localStorage.removeItem('tabela3d-foto-ativa'); } catch (e) { /* ignore */ } }); } // closing the page is not a crash
+      try { localStorage.setItem(chaveLocal('tabela3d-foto-ativa'), String(Date.now())); } catch (e) { /* private mode */ } // crash guard (capacidade.js)
+      if (!window.__g3dSaida) { window.__g3dSaida = true; addEventListener('pagehide', () => { try { localStorage.removeItem(chaveLocal('tabela3d-foto-ativa')); } catch (e) { /* ignore */ } }); } // closing the page is not a crash
       this.pronto = false; this.restauraCache();
       { const c = this.s.tiles.lruCache; this._guardaCache(); c.minBytesSize = 0; c.unloadPercent = 1; c.maxBytesSize = Math.max(c.maxBytesSize, FOTO_MB); } // shooting: bigger budget, shot regions dropped at once
     }
@@ -501,7 +531,7 @@ export class VistaGoogle {
         for (const f of add) { F.faces.push(f); F.alvos.push({ A: alvo(FOTO_LADO), W: alvo(FOTO_LADO_W) }); F.mats.push(new THREE.Matrix4().multiplyMatrices(F.cams[f].projectionMatrix, F.cams[f].matrixWorldInverse)); }
         if (add.length) { F.fundo = true; if (!this.pronto) { this.pronto = true; this.tPronto = agora; } }
       }
-      if (F.i >= F.faces.length) { F.feito = true; cam.clearViewOffset(); if (!this.pronto) { this.pronto = true; this.tPronto = agora; } STATUS.tiles = st.visible || 0; if (capacidade().nivel === 'topo') this.restauraCache(); else this.soltaCache(); try { localStorage.removeItem('tabela3d-foto-ativa'); } catch (e) { /* ignore */ } }
+      if (F.i >= F.faces.length) { F.feito = true; cam.clearViewOffset(); if (!this.pronto) { this.pronto = true; this.tPronto = agora; } STATUS.tiles = st.visible || 0; if (capacidade().nivel === 'topo') this.restauraCache(); else this.soltaCache(); try { localStorage.removeItem(chaveLocal('tabela3d-foto-ativa')); } catch (e) { /* ignore */ } }
     }
     this.acordar();
   }
@@ -571,8 +601,8 @@ export class VistaGoogle {
   }
   montaCredito() {
     const d = document.createElement('div');
-    d.className = 't360-g3d';
-    d.innerHTML = '<img alt="Google" src="' + LOGO + '" height="12" referrerpolicy="no-referrer"><span class="g3d-attr"></span>';
+    d.className = 't360-g3d g3d-cred';
+    d.innerHTML = htmlCredito('Vista da janela e reflexo: Google Maps<br>apartamento: render ilustrativo');
     // discreet progress, a separate element (tour360 places it on the left, the credit sits small on the right)
     this.carga = document.createElement('div'); this.carga.className = 't360-g3d-carga'; this.carga.hidden = true;
     this.carga.innerHTML = '<span>Montando a vista real da cidade</span><i><b></b></i>';
@@ -580,7 +610,7 @@ export class VistaGoogle {
   }
   atualizaCredito() {
     const out = []; this.s.tiles.getAttributions(out);
-    const txt = out.filter((a) => a.type === 'string' && a.value).map((a) => a.value).join(' · ');
+    const txt = textoDados(out);
     const el = this.credito.querySelector('.g3d-attr');
     if (el && el.textContent !== txt) el.textContent = txt;
   }
@@ -592,7 +622,7 @@ export class VistaGoogle {
     if (this.rt) this.rt.dispose();
     if (this.rtV) this.rtV.dispose();
     if (this.foto) { for (const a of this.foto.alvos) { a.A.dispose(); a.W.dispose(); } this.foto = null; }
-    try { localStorage.removeItem('tabela3d-foto-ativa'); } catch (e) { /* ignore */ } // leaving the 360 mid-photo is not a crash
+    try { localStorage.removeItem(chaveLocal('tabela3d-foto-ativa')); } catch (e) { /* ignore */ } // leaving the 360 mid-photo is not a crash
     this.restauraCache();
     this.credito.remove(); if (this.carga) this.carga.remove();
   }
@@ -712,7 +742,7 @@ export function materialSobreposicao() {
     blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneMinusSrcAlphaFactor,
     uniforms: { tG: { value: null }, tM: { value: null }, res: { value: new THREE.Vector2(1, 1) }, ganho: { value: new THREE.Vector3(1, 1, 1) }, forca: { value: 1 }, fA0: { value: null }, fA1: { value: null }, fA2: { value: null }, fA3: { value: null }, fW0: { value: null }, fW1: { value: null }, fW2: { value: null }, fW3: { value: null },
       fM: { value: [new THREE.Matrix4(), new THREE.Matrix4(), new THREE.Matrix4(), new THREE.Matrix4()] }, nF: { value: 0 }, nOk: { value: 0 }, luzBase: { value: new THREE.Vector3(1, 1, 1) }, luzesN: { value: 0 }, usaCubo: { value: 0 }, rumoB: { value: 0 },
-      tV: { value: null }, usaVidro: { value: 0 }, tGV: { value: null }, temJanela: { value: 1 }, caixaMin: { value: new THREE.Vector3(-0.564, -1.55, -1.6) }, caixaMax: { value: new THREE.Vector3(0.34, 0.76, 2.4) }, usaCaixa: { value: 0 }, tPano: { value: null }, panoSrgb: { value: 0 }, espelho: { value: 0 }, forcaV: { value: forcaV }, kDiaV: { value: 1 },
+      tV: { value: null }, usaVidro: { value: 0 }, tGV: { value: null }, temJanela: { value: 1 }, caixaMin: { value: new THREE.Vector3() }, caixaMax: { value: new THREE.Vector3() } /* C8: set from the manifest vidro.caixa (usaCaixa) */, usaCaixa: { value: 0 }, tPano: { value: null }, panoSrgb: { value: 0 }, espelho: { value: 0 }, forcaV: { value: forcaV }, kDiaV: { value: 1 },
       ceuTopo: { value: new THREE.Vector3(0.12, 0.27, 0.6) }, ceuHoriz: { value: new THREE.Vector3(0.55, 0.66, 0.8) } },
   });
 }
@@ -776,10 +806,42 @@ export async function ligarGoogleCena({ scene, camera, renderer, ref, aoMudar, e
   let ganhoCena = [1, 1, 1];
   const tam = new THREE.Vector2(), camSelFora = new THREE.PerspectiveCamera();
   let falhou = false, mostrando = false;
-  const cred = document.createElement('div'); cred.className = 'g3d-cena'; // not t360-g3d: the 360's CSS (bottom:78px) stretched it
-  // compact credit in a corner (Victor 07/10: it took too much space): Google logo + data attribution, one line, top right
-  cred.style.cssText = 'position:absolute;right:8px;top:104px;z-index:5;display:flex;gap:5px;align-items:center;max-width:62%;padding:2px 6px;border-radius:6px;background:rgba(0,0,0,.45);color:#fff;font:9px/1.2 system-ui,sans-serif;pointer-events:none;white-space:nowrap;overflow:hidden';
-  cred.innerHTML = '<img alt="Google" src="' + LOGO + '" height="11" style="display:block;flex:none"><span class="g3d-attr" style="opacity:.85;overflow:hidden;text-overflow:ellipsis"></span>';
+  const cred = document.createElement('div'); cred.className = 'g3d-cena g3d-cred'; // not t360-g3d: the 360's CSS (bottom:78px) stretched it
+  // compact credit in a corner (Victor 07/10 and 15/10: it took too much space): logo + which-part line + data attribution
+  cred.style.cssText = 'position:absolute;right:8px;bottom:120px;z-index:5;max-width:calc(100% - 16px);' + CRED_CSS;
+  cred.innerHTML = htmlCredito('Cidade 3D: Google Maps<br>prédio em destaque: maquete própria');
+  // bottom right of the free part of the stage (the usual place, A4), above the sun bar / phone sheets and left of the
+  // docked desktop panel; at the top right it covered the sun disc on phones (15/10)
+  let credT = 0;
+  const posCred = () => {
+    const agora = performance.now(); if (agora - credT < 300) return; credT = agora;
+    const pai = renderer.domElement.parentElement.getBoundingClientRect();
+    const vis = (q) => { const e = document.querySelector(q); return e && !e.hidden && e.offsetParent !== null ? e.getBoundingClientRect() : null; };
+    let topo = pai.bottom - 30, dir = 8;
+    for (const q of ['#sol-painel', '#sol-painel .sol-dica', '#card', '#unidades']) {
+      const r = vis(q); if (!r || !r.height) continue;
+      if (innerWidth >= 1000 && (q === '#card' || q === '#unidades')) { dir = Math.max(dir, pai.right - r.left + 8); continue; }
+      topo = Math.min(topo, r.top);
+    }
+    const baixo = Math.round(pai.bottom - topo + 8);
+    cred.style.bottom = baixo + 'px'; cred.style.right = Math.round(dir) + 'px'; cred.style.left = 'auto';
+    // 15/10 wave 1: never over our tower. Its box (the cut box, from the ground) projected on the screen; if the credit in
+    // the bottom-right corner would touch it, the credit goes to the bottom-left corner (same height) when that one is free.
+    if (recorte && recorte.min) {
+      const xs = [], ys = [];
+      for (const x of [recorte.min.x, recorte.max.x]) for (const y of [0, recorte.max.y]) for (const z of [recorte.min.z, recorte.max.z]) {
+        vCred.set(x, y, z).project(camera); if (vCred.z > 1) continue;
+        xs.push((vCred.x * 0.5 + 0.5) * pai.width); ys.push((-vCred.y * 0.5 + 0.5) * pai.height);
+      }
+      if (xs.length) {
+        const T = [Math.min(...xs) - 6, Math.min(...ys) - 6, Math.max(...xs) + 6, Math.max(...ys) + 6];
+        const w = cred.offsetWidth, h = cred.offsetHeight, y1 = pai.height - baixo, y0 = y1 - h;
+        const toca = (x0, x1) => x0 < T[2] && x1 > T[0] && y0 < T[3] && y1 > T[1];
+        if (toca(pai.width - dir - w, pai.width - dir) && !toca(8, 8 + w)) { cred.style.right = 'auto'; cred.style.left = '8px'; }
+      }
+    }
+  };
+  const vCred = new THREE.Vector3();
   cred.hidden = true; // only while Google's city is on screen
   renderer.domElement.parentElement.appendChild(cred);
   // our city stays until Google's first view is complete; meanwhile a discreet bar (top left, under the buttons)
@@ -788,6 +850,9 @@ export async function ligarGoogleCena({ scene, camera, renderer, ref, aoMudar, e
   carga.innerHTML = '<span>Montando a cidade real</span><i style="display:block;height:2px;border-radius:2px;background:rgba(255,255,255,.25);overflow:hidden"><b style="display:block;height:100%;width:4%;background:#fff;transition:width .4s ease"></b></i>';
   renderer.domElement.parentElement.appendChild(carga);
   let lote0 = null, pMax = 0;
+  // 15/10 FILA D11: back from the 360 the tiles of the near city had been dropped (the window owned the budget), so the
+  // front buildings stayed blurred while they refined, with no sign. The bar comes back until the view is complete again.
+  let refino = null;
   const aoCarregar = () => aoMudar && aoMudar();
   for (const ev of ['load-model', 'tiles-load-end', 'needs-update']) tiles.addEventListener(ev, aoCarregar);
   const out = [];
@@ -809,7 +874,11 @@ export async function ligarGoogleCena({ scene, camera, renderer, ref, aoMudar, e
       try {
         const t0 = performance.now();
         if (s.dono && s.dono !== api && s.dono.ativo) return; // the 360 window owns the tiles while it is open
-        if (s.dono !== api) { s.tomar(api, scene, m, camSelFora, ERRO_360 * 1.25); s.pintar(ganhoCena); }
+        if (s.dono !== api) {
+          const voltando = !!s.dono && mostrando;
+          s.tomar(api, scene, m, camSelFora, ERRO_360 * 1.25); s.pintar(ganhoCena);
+          if (voltando) { refino = { lote0: null, pMax: 0, t0: performance.now() }; carga.querySelector('b').style.width = '4%'; renderer.domElement.parentElement.appendChild(carga); bombear(); }
+        }
         // tiles are selected only for the part of the screen above the unit card (phone bottom sheet): the city hidden
         // under the card is not downloaded and does not take the memory the prefetch of the unit's window needs
         renderer.getDrawingBufferSize(tam); camera.updateMatrixWorld(true);
@@ -820,8 +889,9 @@ export async function ligarGoogleCena({ scene, camera, renderer, ref, aoMudar, e
         camSelFora.updateProjectionMatrix(); camSelFora.updateMatrixWorld(true);
         tiles.setResolution(camSelFora, tam.x, Math.round(tam.y * fr)); tiles.update();
         out.length = 0; tiles.getAttributions(out);
-        const txt = out.filter((a) => a.type === 'string' && a.value).map((a) => a.value).join(' · ');
+        const txt = textoDados(out);
         const el = cred.querySelector('.g3d-attr'); if (el.textContent !== txt) el.textContent = txt;
+        if (!cred.hidden) posCred();
         const st = tiles.stats, pend = st.queued + st.downloading + st.parsing;
         if (!mostrando) {
           if (lote0 == null) lote0 = st.loaded;
@@ -830,6 +900,12 @@ export async function ligarGoogleCena({ scene, camera, renderer, ref, aoMudar, e
           // Google replaces our city when its view is 85% there, complete, or when this device's memory budget is full
           // (on mid phones the budget fills before 'complete': it never switched - Victor 07/10 21h50)
           if (st.visible > 8 && (pend === 0 || pMax >= 0.85 || tiles.lruCache.isFull())) { mostrando = true; carga.remove(); cred.hidden = !!api.noite; }
+        }
+        if (refino) {
+          if (refino.lote0 == null) refino.lote0 = st.loaded;
+          const feitos = st.loaded - refino.lote0; refino.pMax = Math.max(refino.pMax, pend > 0 ? feitos / (feitos + pend) : 1);
+          carga.querySelector('b').style.width = Math.round(4 + 96 * refino.pMax) + '%';
+          if ((pend === 0 && tiles.loadProgress >= 1 && performance.now() - refino.t0 > 500) || (tiles.lruCache.isFull() && pend === 0 && performance.now() - refino.t0 > 3000) || performance.now() - refino.t0 > 30000) { carga.remove(); refino = null; }
         }
         if (api.preFoto) { // photo prefetch: next region when the queue is empty (or after 15 s); done after the last one
           const P = api.preFoto; P.q = pend === 0 ? P.q + 1 : 0;
@@ -852,7 +928,7 @@ export async function ligarGoogleCena({ scene, camera, renderer, ref, aoMudar, e
       if (falhou || andar == null || final == null) return;
       const { GEO_PREDIO: G } = await import('./google-geo.js');
       const f = G.finais[String(final)]; if (!f) return;
-      const [u, v, hp] = [3.7, 4.3, 1.55];
+      const [u, v, hp] = PREDIO_CFG.tour360.olhoJanela; // C8: eye of the 360 point 'meio' in the plan (predio.json; Upper 3.7, 4.3, 1.55)
       const x = f.M[0] * u + f.M[1] * v + f.t[0], z = f.M[2] * u + f.M[3] * v + f.t[1], y = G.laje_1 + (andar - 1) * G.piso + hp;
       // EXACTLY the first view of the 360 (point meio, yaw 0, portrait 90 deg) cropped to where the window is on that
       // screen (measured 07/10: rows 37%..77% of the height, full width). A wider prefetch (97x70 deg) needed ~1.5 GB and

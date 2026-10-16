@@ -12,26 +12,11 @@ export const STATUS = {
   indisponivel: { rotulo: 'Indisponível', curto: 'Indisp.', icone: '–' },
 };
 
-export const POSICAO = {
-  1: 'fileira 1-3-5-7-9, ponta do lado da rua',
-  2: 'fileira 2-4-6-8, ponta do lado da rua',
-  3: 'fileira 1-3-5-7-9',
-  4: 'fileira 2-4-6-8, junto aos elevadores',
-  5: 'fileira 1-3-5-7-9, no centro',
-  6: 'fileira 2-4-6-8, junto aos elevadores',
-  7: 'fileira 1-3-5-7-9',
-  8: 'fileira 2-4-6-8, ponta oposta à rua',
-  9: 'fileira 1-3-5-7-9, ponta oposta à rua',
-};
-
-// How the architect's final-6 drawing applies to each final (note 6 of the plan)
-export const PLANTA = {
-  6: { tipo: 'original', texto: 'Planta do final 6 (desenho do arquiteto).' },
-  3: { tipo: 'rotacionada', texto: 'O final 3 usa esta planta rotacionada (nota do arquiteto).' },
-  4: { tipo: 'espelhada', texto: 'O final 4 usa esta planta espelhada (nota do arquiteto).' },
-  5: { tipo: 'espelhada', texto: 'O final 5 usa esta planta espelhada (nota do arquiteto).' },
-  7: { tipo: 'espelhada', texto: 'O final 7 usa esta planta espelhada (nota do arquiteto).' },
-};
+// 15/10 FILA C4: position of each final and how the architect's drawing applies to it come from predio.json "finais"
+// (Upper: the final-6 drawing, note 6 of the plan; finais without a drawing have no "planta")
+import { PREDIO_CFG } from './predio.js';
+export const POSICAO = Object.fromEntries(Object.entries(PREDIO_CFG.finais).map(([f, v]) => [f, v.posicao]));
+export const PLANTA = Object.fromEntries(Object.entries(PREDIO_CFG.finais).filter(([, v]) => v.planta).map(([f, v]) => [f, v.planta]));
 
 export function el(tag, attrs = {}, ...filhos) {
   const e = document.createElement(tag);

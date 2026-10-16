@@ -17,6 +17,7 @@
 // are filled with real facade pixels of the same building (or of a similar one); ground and roofs = GeoSampa
 // orthophoto 2020. Built by D:\Imobiliaria-Hugo\uber-itaim\b7-entorno\scripts (see docs/RELATORIO-B7-entorno.md).
 import * as THREE from 'three';
+import { PREDIO_CFG } from './predio.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { posicaoSolar, fatorLuzesNoite, calorSol, corCeu, smooth, fatorDia, forcaSolDireto } from './luz-curva.js';
 import { SOL } from './dados-sol.js';
@@ -49,8 +50,9 @@ export function gradeEntorno(el) {
   });
   return { k, base, quente, frio, azul, noite, luzes };
 }
-export const ATRIBUICAO_ENTORNO = 'Entorno: imagens de drone do prédio (abr/2026); mapa 3D LiDAR 2017 e ortofoto 2020 da Prefeitura de São Paulo — GeoSampa (CC BY-SA 4.0).';
-export const NOTA_ENTORNO = 'vista reconstruída a partir de imagens de drone (abril/2026) e do mapa 3D da Prefeitura';
+// 15/10 FILA C9: attribution of the city data and the extent of the street-light map come from predio.json "entorno"
+export const ATRIBUICAO_ENTORNO = PREDIO_CFG.entorno.atribuicao;
+export const NOTA_ENTORNO = PREDIO_CFG.entorno.nota;
 
 const VERT = /* glsl */`
   #include <common>
@@ -446,7 +448,7 @@ function material(map, tipo) {
       uHaze: { value: new THREE.Color(0xd8dde2) }, uHazeQ: { value: new THREE.Color(0xd8dde2) }, uHazeD: { value: 0.0007 },
       uFant: { value: 0 }, uCam: { value: new THREE.Vector3() }, uAlvo: { value: new THREE.Vector3(15, 25, 8) }, uRaio: { value: 22 }, uSoChao: { value: 0 },
       uDet: { value: null }, uDetOn: { value: 0 }, uDetBox: { value: new THREE.Vector3(15, 8, 80) },
-      uRua: { value: null }, uRuaOn: { value: 0 }, uRuaExt: { value: 409.6 },
+      uRua: { value: null }, uRuaOn: { value: 0 }, uRuaExt: { value: PREDIO_CFG.entorno.extensaoRuas_m },
       uLmP: { value: null }, uLmT: { value: null }, uLmOn: { value: 0 }, uLmPOn: { value: 0 }, uLmBox: { value: new THREE.Vector3(0, 0, 1) }, uLmK: { value: new THREE.Vector3(...LM_K) },
       uFach: { value: null }, uFachOn: { value: 0 }, uFachMed: { value: Array.from({ length: 6 }, () => new THREE.Vector4(0.1, 0.1, 0.1, 0.5)) }, uFachW: { value: new Array(6).fill(1) },
     },
@@ -492,20 +494,20 @@ function carregarTextura(url, renderer, ms = 30000) {
     ok(t);
   }, undefined, () => erro(new Error('falhou: ' + url.split('/').pop())))), ms, url.split('/').pop()));
 }
-// geometry: .glb first; if the host refuses/misses it, the same bytes as base64 in <name>.glb.json (published pages
-// may not carry .glb files - E1, 06/10: the artifact had every texture but neither .glb)
+// geometry: the same bytes as base64 in <name>.glb.json FIRST (the published host never carries .glb - E1 06/10, SOL-1111),
+// the binary .glb only as a fallback for local tests. 15/10 (FILA D16): the old order cost 3 x 404 on every opening.
 function carregarGlb(nome, ms = 30000) {
   return emCache('glb:' + nome, () => comPrazo((async () => {
-    let buf = null, via = 'glb';
+    let buf = null, via = 'json';
     try {
-      const r = await fetch(BASE + nome); if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      buf = await r.arrayBuffer();
-      if (new DataView(buf).getUint32(0, true) !== 0x46546C67) throw new Error('nao e glb');
-    } catch (e) {
-      const r = await fetch(BASE + nome + '.json'); if (!r.ok) throw new Error(`${nome}: ${e.message}; .json HTTP ${r.status}`);
+      const r = await fetch(BASE + nome + '.json'); if (!r.ok) throw new Error(`.json HTTP ${r.status}`);
       const bin = atob((await r.json()).b64); const u8 = new Uint8Array(bin.length);
       for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
-      buf = u8.buffer; via = 'json';
+      buf = u8.buffer;
+    } catch (e) {
+      const r = await fetch(BASE + nome); if (!r.ok) throw new Error(`${nome}: ${e.message}; .glb HTTP ${r.status}`);
+      buf = await r.arrayBuffer(); via = 'glb';
+      if (new DataView(buf).getUint32(0, true) !== 0x46546C67) throw new Error(nome + ': nao e glb');
     }
     const gltf = await new Promise((ok, erro) => new GLTFLoader().parse(buf, '', ok, erro));
     gltf.scene.updateMatrixWorld(true);
@@ -764,7 +766,7 @@ export function criarEntorno({ cena, renderer, modo = 'interior', T = null, hPis
     // view is brighter than the room (camera exposed for the interior). Interior mode lifts the city's exposure in daylight.
     if (modo === 'interior') { const g = 1 + (JANELA_EXPO - 1) * fatorDia(el); G.base = G.base.map((v) => v * g); G.k *= g; }
     // sun direction in the B5 frame (+x bearing = eixo), then to world (interior: the group's rotation)
-    const eixo = (SOL.meta.orientacao && SOL.meta.orientacao.eixo_x_predio_bearing_graus) || 73.4, r = Math.PI / 180;
+    const eixo = (SOL.meta.orientacao && SOL.meta.orientacao.eixo_x_predio_bearing_graus) || PREDIO_CFG.geo.rumoSolReserva, r = Math.PI / 180;
     const h = Math.cos(Math.max(el, 0) * r);
     solB5.set(h * Math.cos((estado.az - eixo) * r), Math.sin(Math.max(el, 0) * r), h * Math.sin((estado.az - eixo) * r)).normalize();
     grupo.updateMatrixWorld(); solW.copy(solB5).applyMatrix3(m3.setFromMatrix4(grupo.matrixWorld)).normalize();

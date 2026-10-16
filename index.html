@@ -1,5 +1,7 @@
 <!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><style>:root{color-scheme:light;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0;font:14px system-ui,sans-serif;background:#fafaf9}img{max-width:100%}[hidden]{display:none!important}</style><title>Tabela Upper Itaim</title>
 <meta name="description" content="Upper Itaim, R. João Cachoeira 1577: escolha seu studio no prédio em 3D, com situação, preço e WhatsApp por unidade. Tabela de outubro/2026.">
+<!-- 15/10 FILA C1: every double-brace p: marker comes from predio.json, filled when the page is built (docs/b10-scripts/publicar_cfg.py preenche_index) -->
+<link rel="icon" type="image/svg+xml" href="assets/marca/icone.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant:wght@500;600;700&family=Inter:wght@400..700&display=swap">
@@ -9,17 +11,17 @@
    green-tinted balcony glass. One dark visual world on purpose (single theme). Mobile first; desktop gets
    its own composition (docked units panel on the right, split opening). */
 :root {
-  --base: #141210;          /* Geracional Pitch Black */
-  --base-2: #2c2c2a;        /* Geracional Graphite */
+  --base: #141210;          /* brand palette: predio.json marca.paleta */
+  --base-2: #2c2c2a;
   --painel: rgba(20, 18, 16, .74);
   --painel-forte: rgba(20, 18, 16, .92);
   --linha: rgba(245, 243, 239, .12);
   --linha-2: rgba(245, 243, 239, .22);
-  --texto: #f5f3ef;         /* Geracional Parchment */
+  --texto: #f5f3ef;
   --texto-2: #bdb8b0;
-  --tijolo: #ef5b2e;        /* Geracional Spicy Paprika, main action */
+  --tijolo: #ef5b2e;        /* main action */
   --tijolo-2: #f3784f;
-  --amaranto: #8b1a3a;      /* Geracional Dark Amaranth */
+  --amaranto: #8b1a3a;
   --vidro: #8fb8a9;         /* balcony glass, secondary accent */
   --disp: #009e73;          /* status colours (Okabe-Ito, legend G-D5) */
   --disp-txt: #46d6a9;
@@ -155,7 +157,7 @@ h1, h2, h3 { margin: 0; text-wrap: balance; }
 .foto-svg .un:focus-visible { outline: none; }
 .foto-svg .un.fora .vidro { opacity: .15; }
 /* night (F20): the warm light lives inside the glass: the unlit photo, warm-graded, clipped to lit units */
-.foto-svg { display: none; } /* F27: Foto = photo-only showcase (65 of 117 units visible would mislead) */
+.foto-svg { display: none; } /* F27: Foto = photo-only showcase (a photo shows only part of the units: misleading) */
 .foto-escolher { position: absolute; z-index: 5; left: 50%; transform: translateX(-50%); bottom: calc(env(safe-area-inset-bottom, 0px) + var(--legal-h) + 74px); border: 0; border-radius: 999px; padding: 12px 22px; font: 600 15px/1 'Archivo', system-ui, sans-serif; color: #15130f; background: #f2c14e; box-shadow: 0 6px 22px rgba(0,0,0,.35); cursor: pointer; }
 .foto-escolher:hover { background: #ffd36b; }
 .foto-escolher:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
@@ -199,9 +201,15 @@ body.vista-foto #sol-painel, body.vista-foto #dica, body.vista-foto #noite-legen
 /* F34: the sun/time bar sits where the tab bar was; F32: wide track (linear 0-24 h, ~2.4 min per px on desktop) */
 .sol-painel { position: absolute; z-index: 24; left: 50%; transform: translateX(-50%); bottom: calc(env(safe-area-inset-bottom, 0px) + var(--legal-h) + 8px); width: min(1180px, calc(100% - 24px)); }
 @media (min-width: 1000px) { body.painel-aberto .sol-painel { left: calc((100% - 432px) / 2); width: calc(100% - 432px - 32px); } }
+/* 15/10 FILA D2: with the list/card docked on the right (z 30, 400 px + 16 px), the "i" of the top bar moves left of it */
+@media (min-width: 1000px) { body.painel-aberto .topo { right: calc(432px + 12px); } }
 .barra { display: none !important; }
 .chip-foto { margin-top: 2px; border: 0; border-radius: 999px; padding: 7px 12px; font: 600 12.5px/1 'Archivo', system-ui, sans-serif; color: var(--texto); cursor: pointer; align-self: flex-start; }
-.chip-lista { position: absolute; z-index: 26; right: 16px; top: calc(env(safe-area-inset-top, 0px) + 64px); border: 0; border-radius: 999px; padding: 9px 14px; font: 600 13px/1 'Archivo', system-ui, sans-serif; color: var(--texto); cursor: pointer; }
+/* 15/10 FILA D1: "Unidades" sits in the row of "Início" (same column as the legend), so the flex flow keeps it off the
+   legend on every width; it was absolute at the top right and covered the end of the legend on phones (360-412 px). */
+.marca-acoes { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.marca-acoes .chip-foto { margin-top: 0; }
+.chip-lista { position: static; border: 0; border-radius: 999px; padding: 9px 14px; font: 600 13px/1 'Archivo', system-ui, sans-serif; color: var(--texto); cursor: pointer; }
 body.painel-aberto .chip-lista, body.vista-foto .chip-lista { display: none; }
 .cd-voltar { display: block; border: 0; background: none; color: var(--texto); font: 600 13px/1 'Archivo', system-ui, sans-serif; padding: 6px 0 2px; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
 .rotulo-andar { pointer-events: none; }
@@ -225,11 +233,13 @@ body.painel-aberto .chip-lista, body.vista-foto .chip-lista { display: none; }
 .sol-btn .sol-ico { background: #1c1404; box-shadow: none; width: 9px; height: 9px; }
 .sol-ctl.andando .sol-btn { box-shadow: 0 0 0 4px rgba(244,196,90,.35); }
 .sol-relogio { display: grid; line-height: 1.05; flex: none; min-width: 0; max-width: 118px; } /* F32: more track for the hour */
+@media (min-width: 1000px) { .sol-relogio { max-width: 250px; } } /* 15/10 FILA D6: "Inverno · 21/06 · nasce 06:47 · põe 17:28" whole; the track keeps min 140 px */
+@media (min-width: 1000px) and (max-width: 1279px) { .sol-relogio { max-width: 150px; } .sol-sub { white-space: normal; line-height: 1.2; } } /* 1024 with the panel open: 2 lines, the hour track keeps its width */
 .sol-ctl.fino .sol-range::-webkit-slider-thumb { box-shadow: 0 0 0 6px rgba(244,196,90,.45); } /* F32b: fine mode */
 .sol-hora { font: 600 22px var(--f-mono); letter-spacing: -.03em; }
 .sol-sub { font-size: 10.5px; color: rgba(241,237,230,.66); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sol-trilho { position: relative; flex: 1 1 auto; min-width: 140px; height: 44px; --nasce: 25%; --poe: 75%; --meio: 50%; }
-.sol-trilho::before { content: ""; position: absolute; left: 0; right: 0; top: 50%; height: 8px; transform: translateY(-50%); border-radius: 8px; pointer-events: none;
+.sol-trilho::before { content: ""; position: absolute; left: 12px; right: 12px; top: 50%; height: 8px; transform: translateY(-50%); border-radius: 8px; pointer-events: none;
   background: linear-gradient(90deg, #0f1830 0%, #1d2a4d calc(var(--nasce) - 5%), #e7a26b var(--nasce), #f2d48e calc(var(--nasce) + 6%), #fbe6a6 var(--meio), #f2d48e calc(var(--poe) - 6%), #e48d5c var(--poe), #1d2a4d calc(var(--poe) + 5%), #0f1830 100%); }
 .sol-range { position: absolute; inset: 0; width: 100%; height: 44px; margin: 0; background: transparent; -webkit-appearance: none; appearance: none; cursor: pointer; touch-action: none; }
 .sol-range::-webkit-slider-runnable-track { height: 44px; background: transparent; }
@@ -238,11 +248,15 @@ body.painel-aberto .chip-lista, body.vista-foto .chip-lista { display: none; }
 .sol-range::-moz-range-thumb { width: 18px; height: 18px; border-radius: 50%; background: #fff; border: 3px solid #f4c45a; box-shadow: 0 2px 8px rgba(0,0,0,.45); }
 .sol-range:focus-visible { outline: none; }
 .sol-range:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 4px rgba(143,184,169,.7); }
-.sol-marcas { position: absolute; inset: 0; pointer-events: none; }
+/* 15/10 FILA D7: the hour of a click is (x - 12 px) / (width - 24 px) (the thumb radius, sol.js tDoX); the coloured bar,
+   the sunrise/sunset ticks and the 0h/12h/24h labels now use the SAME 12 px inset. They used the full width, so a tap
+   on the bar where it showed 20:30 gave 21:07 on a phone (C §2 #5, reproduced 15/10). */
+.sol-marcas { position: absolute; top: 0; bottom: 0; left: 12px; right: 12px; pointer-events: none; }
 .sol-marcas i { position: absolute; top: 9px; width: 2px; height: 8px; background: rgba(255,255,255,.75); border-radius: 1px; }
 .sol-marcas .m-nasce { left: var(--nasce); } .sol-marcas .m-poe { left: var(--poe); }
 .sol-marcas .m-txt { position: absolute; bottom: -1px; font: 500 9px var(--f-mono); color: rgba(241,237,230,.55); transform: translateX(-50%); }
-.m-txt.m0 { left: 2%; } .m-txt.m12 { left: 50%; } .m-txt.m24 { left: 98%; }
+.m-txt.m0 { left: 0; } .m-txt.m12 { left: 50%; } .m-txt.m24 { left: 100%; }
+.sol-marcas i { transform: translateX(-1px); }
 .sol-est { flex: none; min-height: 34px; border-radius: 999px; border: 1px solid rgba(255,255,255,.16); background: rgba(255,255,255,.06); color: #f1ede6; font: 600 12.5px var(--f-body); padding: 0 10px; }
 .sol-est option { background: #181b19; color: #f1ede6; }
 .sol-dica { position: absolute; left: 14px; top: -24px; font-size: 11.5px; color: #f4c45a; background: rgba(16,18,17,.7); padding: 2px 8px; border-radius: 999px; pointer-events: none; }
@@ -251,6 +265,7 @@ body.painel-aberto .chip-lista, body.vista-foto .chip-lista { display: none; }
   .sol-ctl { flex-wrap: wrap; border-radius: 22px; gap: 4px 10px; padding: 8px 10px; }
   .sol-relogio { flex: 1; max-width: none; }
   .sol-hora { font-size: 20px; }
+  .sol-sub { white-space: normal; line-height: 1.2; } /* 15/10 FILA D6: at 360 px "23/09 · sol 05:57–18:03" was cut; it wraps to 2 lines */
   .sol-trilho { order: 5; flex-basis: 100%; }
   .sol-btn { min-height: 40px; padding: 0 12px; }
 }
@@ -359,6 +374,8 @@ body.painel-aberto .chip-lista, body.vista-foto .chip-lista { display: none; }
 .legal dl { display: grid; grid-template-columns: minmax(0, 10em) minmax(0, 1fr); gap: 7px 12px; font-size: 13.5px; margin: 12px 0; }
 .legal dt { color: var(--texto-2); } .legal dd { margin: 0; }
 .legal p { font-size: 13px; color: var(--texto-2); }
+.legal .legal-termos { font: 600 11px var(--f-mono); letter-spacing: .1em; text-transform: uppercase; color: var(--texto); margin: 16px 0 0; } /* 15/10 Google ToS §3.2.2(a) */
+.legal a { color: var(--texto); text-underline-offset: 2px; }
 
 /* tour (photos of the furnished studio) */
 .tour { position: fixed; inset: 0; z-index: 90; background: var(--base); overflow: auto; overscroll-behavior: contain; }
@@ -392,17 +409,20 @@ body.painel-aberto .chip-lista, body.vista-foto .chip-lista { display: none; }
 .lb-topo { display: flex; justify-content: space-between; align-items: center; padding: calc(env(safe-area-inset-top, 0px) + 10px) 14px 8px; }
 .lb-trilho { display: flex; overflow-x: auto; scroll-snap-type: x mandatory; scrollbar-width: none; min-height: 0; }
 .lb-trilho::-webkit-scrollbar { display: none; }
-.lb-slide { flex: 0 0 100%; scroll-snap-align: center; margin: 0; display: grid; grid-template-rows: 1fr auto; align-items: center; justify-items: center; padding: 0 8px; min-height: 0; }
-.lb-slide img { max-width: 100%; max-height: calc(100vh - 190px); width: auto; height: auto; object-fit: contain; border-radius: 6px; aspect-ratio: 3 / 2; }
-.lb-slide figcaption { font-size: 13px; padding: 8px 4px 0; text-align: center; color: var(--texto-2); }
+/* 15/10 FILA D8: the slide is a column (photo takes what is left, caption keeps its height), so the caption is never
+   pushed under the Anterior/Próxima bar; the old max-height: calc(100vh - 190px) ignored the real bar heights. */
+.lb { height: 100dvh; }
+.lb-slide { flex: 0 0 100%; scroll-snap-align: center; margin: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 0 8px; min-height: 0; }
+.lb-slide img { flex: 1 1 0; min-height: 0; width: 100%; max-width: 100%; object-fit: contain; border-radius: 6px; }
+.lb-slide figcaption { flex: none; font-size: 13px; padding: 8px 4px 0; text-align: center; color: var(--texto-2); }
 .lb-base { padding: 8px 14px calc(env(safe-area-inset-bottom, 0px) + 14px); display: grid; gap: 8px; }
 .lb-nav { display: flex; justify-content: space-between; gap: 10px; }
 .lb-nav button { border: 1px solid var(--linha); background: var(--base-2); border-radius: 999px; padding: 8px 16px; font-weight: 600; }
 #lb-cont { font: 600 13px var(--f-mono); }
 
 /* gallery of real 2026 frames (and B6 stills when they exist) */
-.galeria { position: fixed; inset: 0; z-index: 96; background: #0b0d0c; display: grid; grid-template-rows: auto 1fr auto; }
-.galeria .lb-slide img { aspect-ratio: auto; max-height: calc(100vh - 170px); }
+.galeria { position: fixed; inset: 0; z-index: 96; background: #0b0d0c; display: grid; grid-template-rows: auto 1fr auto; height: 100dvh; }
+.galeria .lb-slide img { aspect-ratio: auto; }
 .gal-legenda { margin: 0; font-size: 12.5px; color: var(--texto-2); text-align: center; }
 .cd-galeria { display: grid; grid-auto-flow: column; grid-auto-columns: 34%; gap: 6px; overflow-x: auto; scroll-snap-type: x mandatory; padding-bottom: 4px; }
 .cd-galeria button { border: 0; padding: 0; border-radius: 10px; overflow: hidden; aspect-ratio: 3 / 4; scroll-snap-align: start; background: var(--base-2); }
@@ -444,7 +464,7 @@ body.painel-aberto .chip-lista, body.vista-foto .chip-lista { display: none; }
 .int-barra { position: absolute; z-index: 20; top: calc(env(safe-area-inset-top, 0px) + 12px); right: 12px; display: flex; align-items: center; gap: 8px; padding: 6px 6px 6px 14px; border-radius: 999px; max-width: calc(100% - 200px); }
 .ib-txt { font-size: 13.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .ib-txt b { font-family: var(--f-body); font-weight: 700; font-variant-numeric: lining-nums tabular-nums; } /* 08/10 Victor: Cormorant's old-style 135 clashed with the tour's sans */
-.ib-txt .ib-preco { margin-left: 6px; } .ib-txt .ib-preco::before { content: '\00B7  '; } .ib-txt .ib-andar-c { display: none; }
+.ib-txt .ib-preco { margin-left: 6px; } .ib-txt .ib-preco::before { content: '\00B7  '; } .ib-txt .ib-andar-c, .ib-txt .ib-preco-curto { display: none; }
 .ib-txt .ib-sit.disponivel { color: var(--disp-txt); } .ib-txt .ib-sit.reservada { color: var(--res-txt); } .ib-txt .ib-sit.indisponivel { color: var(--texto-2); }
 .int-barra .btn-pri, .int-barra .btn-sec { min-height: 38px; padding: 0 14px; font-size: 13.5px; flex: none; }
 @media (max-width: 760px) { .linha-legal .seg, .linha-legal .lg-extra { display: none; } } /* 08/10: phone footer = company + date + legal link, never truncated */
@@ -456,8 +476,16 @@ body.painel-aberto .chip-lista, body.vista-foto .chip-lista { display: none; }
   .ib-txt { flex: 1; display: flex; flex-direction: column; white-space: nowrap; font-size: 12px; line-height: 1.25; }
   .ib-txt .ib-l1 { overflow: hidden; }
   .ib-txt .ib-sep, .ib-txt .ib-sit, .ib-txt .ib-andar { display: none; } .ib-txt .ib-andar-c { display: inline; }
-  .ib-txt .ib-preco { margin: 0; font-size: 11.5px; color: var(--texto-2); } .ib-txt .ib-preco::before { content: none; }
+  .ib-txt .ib-preco { display: none; } /* 15/10 FILA D3: phone = short price, the line ends with an ellipsis if it still does not fit */
+  .ib-txt .ib-preco-curto { display: inline; margin: 0; font-size: 11.5px; color: var(--texto-2); }
+  .ib-txt { min-width: 0; } .ib-txt .ib-l1, .ib-txt .ib-l2 { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
   .int-barra .btn-pri, .int-barra .btn-sec { flex: none; min-height: 32px; padding: 0 10px; font-size: 12.5px; }
+  /* 16/10 wave 1 (D3 follow-up): in a 390 px Chrome the short price still ended in '...' ("R$ 1,175 ..."): 2 px less gap
+     between the bar items gives "R$ 1,175 mi" its room; the ellipsis stays only as a last resort */
+  .int-barra { gap: 4px; }
+}
+@media (max-width: 370px) {
+  .ib-txt .ib-andar-p { display: none; } /* 360 px phones: "10º · R$ 1,175 mi" (with the word 'andar' the price lost 27 px) */
 }
 .int-detalhes { z-index: 25; }
 .interior:has(#int-detalhes:not([hidden])) .int-barra { display: none; }
@@ -474,11 +502,11 @@ body.revisao .aviso-revisao { display: block !important; }
 <script type="importmap">
 {
   "imports": {
-    "three": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.min.js",
-    "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.core.js": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.core.min.js",
-    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.186.1/examples/jsm/",
-    "camera-controls": "https://cdn.jsdelivr.net/npm/camera-controls@3.1.2/dist/camera-controls.module.min.js",
-    "detect-gpu": "https://cdn.jsdelivr.net/npm/detect-gpu@5.0.70/dist/detect-gpu.esm.js"
+    "three": "./src/vendor/three@0.186.1/build/three.module.min.js",
+    "./src/vendor/three@0.186.1/build/three.core.js": "./src/vendor/three@0.186.1/build/three.core.min.js",
+    "three/addons/": "./src/vendor/three@0.186.1/examples/jsm/",
+    "camera-controls": "./src/vendor/camera-controls@3.1.2/dist/camera-controls.module.min.js",
+    "detect-gpu": "./src/vendor/detect-gpu@5.0.70/dist/detect-gpu.esm.js"
   }
 }
 </script>
@@ -499,7 +527,10 @@ body.revisao .aviso-revisao { display: block !important; }
         <span><i class="dot indisponivel" aria-hidden="true"></i>Indisponível</span>
       </div>
       <p class="noite-legenda vidro" id="noite-legenda" hidden></p>
-      <button type="button" class="chip-foto vidro" id="btn-foto-real">Início</button>
+      <div class="marca-acoes">
+        <button type="button" class="chip-foto vidro" id="btn-foto-real">Início</button>
+        <button type="button" class="chip-lista vidro" id="btn-lista" aria-controls="unidades">Unidades</button>
+      </div>
     </div>
     <button type="button" class="btn-i vidro" id="btn-legal" aria-label="Informações e avisos">i</button>
   </header>
@@ -507,7 +538,6 @@ body.revisao .aviso-revisao { display: block !important; }
   <p class="dica vidro" id="dica">Toque numa janela para ver a unidade</p>
   <div class="sol-painel" id="sol-painel" hidden></div>
 
-  <button type="button" class="chip-lista vidro" id="btn-lista" aria-controls="unidades">Unidades</button>
   <nav class="barra vidro" aria-label="Ações" hidden>
     <button type="button" id="btn-vista" aria-pressed="false" hidden>
       <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="3.5" y="5" width="17" height="14" rx="2.5"/><path d="m4 16 5-5 4 4 3-3 4 4"/><circle cx="15.5" cy="9" r="1.4"/></svg>
@@ -522,7 +552,7 @@ body.revisao .aviso-revisao { display: block !important; }
 
   <p class="linha-legal" id="linha-legal">
     <span class="txt"><span data-cfg="imobiliaria"></span><span class="seg" data-seg="creciJ"> · CRECI-J <span data-cfg="creciJ"></span></span> · <span data-cfg="tabelaCurta"></span><span class="lg-extra"> · simulação ilustrativa<span id="atrib-curta" hidden> · entorno: GeoSampa/PMSP (CC BY-SA 4.0)</span></span></span>
-    <button type="button" id="btn-legal-2" aria-controls="legal">Informações legais</button>
+    <button type="button" id="btn-legal-2" aria-controls="legal">Termos e informações</button>
   </p>
 </main>
 
@@ -530,7 +560,7 @@ body.revisao .aviso-revisao { display: block !important; }
   <div class="folha-alca" aria-hidden="true"></div>
   <div class="folha-cab">
     <div class="u-titulo">
-      <h2>117 studios</h2>
+      <h2 id="u-total"></h2>
       <div class="u-resumo" id="resumo"></div>
     </div>
     <button type="button" class="x" id="unidades-fechar" aria-label="Fechar a lista">×</button>
@@ -651,6 +681,8 @@ body.revisao .aviso-revisao { display: block !important; }
     <p>Maquete 3D: simulação ilustrativa, volumes e cores fora de escala exata. Simulação do sol: pode variar com obstáculos não mapeados. Prédios vizinhos no cálculo do sol: © colaboradores do OpenStreetMap (ODbL).</p>
     <p id="legal-entorno" hidden></p>
     <p>Versão de teste: número de andares e posição das fileiras a conferir com o corretor.</p>
+    <h3 id="termos" class="legal-termos">Termos de uso</h3>
+    <p>Este site inclui recursos e conteúdo do Google Maps: a cidade em 3D ao redor do prédio, a vista das janelas e o reflexo no vidro da varanda. O uso dos recursos e do conteúdo do Google Maps está sujeito às versões em vigor dos <a href="https://maps.google.com/help/terms_maps/" target="_blank" rel="noopener">Termos de Serviço Adicionais do Google Maps para Usuários Finais</a> e da <a href="https://policies.google.com/privacy" target="_blank" rel="noopener">Política de Privacidade do Google</a>.</p>
     <p>Privacidade: esta página não coleta seus dados. O botão de WhatsApp abre o aplicativo com a mensagem escrita; nada é enviado sem você confirmar.</p>
   </section>
 </div>

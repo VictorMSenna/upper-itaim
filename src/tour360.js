@@ -8,9 +8,11 @@
 // Frames: manifest points are in the plan of the unit (u, v, h metres; v toward the balcony). three.js world:
 //   X = -v, Y = h, Z = u  (pano centre = +v = -X, turning right = increasing pano u, like the Blender equirect camera).
 import { capacidade, rebaixar } from './capacidade.js';
+import { chaveLocal } from './predio.js';
 import * as THREE from 'three';
 import { SOL } from './dados-sol.js';
-import { MisturaPonto, ROTULO, LUZES, INFO } from './render-mix.js';
+import { MisturaPonto, ROTULO, INFO } from './render-mix.js';
+import { solNoInstante } from './interior-sol.js';
 
 let atual = null;
 export async function abrirTour360(opts) { if (atual) atual.fechar(false); atual = await criar(opts); return atual.api; }
@@ -21,21 +23,38 @@ export function irPara(id) { return atual?.api.irPara(id); }
 export function estadoTour360() { return atual ? atual.api.estado() : null; }
 export function fecharTour360() { atual?.fechar(true); }
 
-const NOMES_LUZ = { teto: 'Spots do teto', abajur: 'Abajures', cortineiro: 'LED da cortina', cozinha: 'Luz da cozinha' };
-const CURTO_LUZ = { teto: 'Spots', abajur: 'Abajur', cortineiro: 'LED', cozinha: 'Cozinha' }; // phone labels
+// 15/10 FILA C8: lamp names, the start point, the lamps lit at night and the night white reference come from the manifest
+// ("cena" block of assets/render/tour360/manifesto.json); CENA is set when a tour opens
+let CENA = { luzes: [], nomesLuz: {}, curtoLuz: {}, luzesNoite: [], inicio: null, refLuz: null, pufe: {} };
 const paraMundo = ([u, v, h]) => new THREE.Vector3(-v, h, u);
+// D18c (Victor 16/10): until the client presses a lamp button, the lamps follow the hour: by day all off, at night only the
+// spots (night = sun below -2 deg, where the day/night blend of render-mix.js starts). His first press makes his set the
+// state of the visit (sessionStorage; in memory if storage is blocked): kept across hours, points, units, leaving and
+// re-entering, never changed automatically again.
+const CHAVE_LUZES = chaveLocal('tabela3d-luzes-cliente'); // C2: with the building id
+let luzesMemoria = null;
+function luzesDoCliente() {
+  try { const o = JSON.parse(sessionStorage.getItem(CHAVE_LUZES) || 'null'); if (o && typeof o === 'object') return o; } catch (e) { /* private mode */ }
+  return luzesMemoria;
+}
+function guardaLuzesCliente(l) { luzesMemoria = { ...l }; try { sessionStorage.setItem(CHAVE_LUZES, JSON.stringify(luzesMemoria)); } catch (e) { /* memory only */ } }
+function luzesAuto(estacao, minutos) {
+  let el = -12; try { const s = solNoInstante(SOL, estacao, minutos); if (Number.isFinite(s.el)) el = s.el; } catch (e) { /* no sun data: night */ }
+  return Object.fromEntries(CENA.luzes.map((k) => [k, el < -2 && CENA.luzesNoite.includes(k)]));
+}
 
 async function criar({ container, manifesto = 'assets/render/tour360/manifesto.json', ponto, estacao = 'inverno', minutos = 900,
-  luzes = {}, aoFechar, teste = false, andar = null, final = null }) {
+  luzes = null, aoFechar, teste = false, andar = null, final = null, numero = null }) {
   const man = typeof manifesto === 'string' ? await (await fetch(manifesto)).json() : manifesto;
   const base = typeof manifesto === 'string' ? manifesto.replace(/[^/]*$/, '') : (man.base || '');
   const PTS = Object.fromEntries(man.pontos.map((p) => [p.id, p]));
-  const REF_LUZ = (() => { const c = PTS.cozinha && PTS.cozinha.camadas && PTS.cozinha.camadas.cozinha; return c ? (c.media_dentro || c.media) : null; })();
+  CENA = { ...CENA, ...(man.cena || {}) };
+  const REF_LUZ = (() => { const r = CENA.refLuz, c = r && PTS[r.ponto] && PTS[r.ponto].camadas && PTS[r.ponto].camadas[r.camada]; return c ? (c.media_dentro || c.media) : null; })();
   // first view: the middle of the room facing the balcony when it has the new render (window mask = its own exposure +
   // Google city of the unit); otherwise the first point with a window mask; the manifest order last (07/10 Victor)
-  const pontoInicial = () => (man.pontos.find((p) => p.id === 'entrada' && p.camadas && p.camadas.fora) || man.pontos.find((p) => p.camadas && p.camadas.fora) || man.pontos[0]).id; // Victor 08/10: the tour starts at the entrance
-  const estado = { estacao, minutos, luzes: { ...luzes }, ponto: ponto && PTS[ponto] ? ponto : pontoInicial() };
-  let G = null; // B10 (local test): optional live layer with Google Photorealistic 3D Tiles behind the `fora` window mask; null = current behaviour
+  const pontoInicial = () => (man.pontos.find((p) => p.id === CENA.inicio && p.camadas && p.camadas.fora) || man.pontos.find((p) => p.camadas && p.camadas.fora) || man.pontos[0]).id; // Victor 08/10: the tour starts at the entrance
+  const estado = { estacao, minutos, luzes: { ...(luzesDoCliente() || luzes || luzesAuto(estacao, minutos)) }, ponto: ponto && PTS[ponto] ? ponto : pontoInicial() };
+  let G = null; // B10 (ON in the published site): live layer with Google Photorealistic 3D Tiles behind the `fora` window mask; null = current behaviour
 
   // ---------------------------------------------------------------- DOM
   const raiz = document.createElement('div');
@@ -45,8 +64,10 @@ async function criar({ container, manifesto = 'assets/render/tour360/manifesto.j
     <button type="button" class="t360-rot" aria-label="Sobre a imagem" aria-expanded="false"><span class="t360-rot-i" aria-hidden="true">i</span><span class="t360-rot-txt">${ROTULO}</span></button>
     <div class="t360-vista" hidden>Vista simulada</div>
     <div class="t360-nome"></div>
-    <div class="t360-luzes">${LUZES.filter((k) => man.pontos.some((p) => p.camadas && p.camadas[k])).map((k) => `<button data-luz="${k}" aria-pressed="false" title="${NOMES_LUZ[k]}"><span class="l-longo">${NOMES_LUZ[k]}</span><span class="l-curto">${CURTO_LUZ[k]}</span></button>`).join('')}</div>
-    <button class="t360-fechar" aria-label="Fechar">×</button>`;
+    <div class="t360-luzes">${CENA.luzes.filter((k) => man.pontos.some((p) => p.camadas && p.camadas[k])).map((k) => `<button data-luz="${k}" aria-pressed="false" title="${CENA.nomesLuz[k] || k}"><span class="l-longo">${CENA.nomesLuz[k] || k}</span><span class="l-curto">${CENA.curtoLuz[k] || CENA.nomesLuz[k] || k}</span></button>`).join('')}</div>
+    <button class="t360-fechar" aria-label="Fechar">×</button>
+    <div class="t360-chips"></div>
+    <div class="t360-aviso-sol" hidden>Esta sacada tem sol direto agora; o passeio foi feito num studio de outra face e não mostra esse sol (veja o cartão).</div>`;
   // 08/10 Victor: the city reflected in the balcony glass is nice but sometimes in the way -> on/off, only where there is glass
   const bR = document.createElement('button'); bR.className = 't360-reflexo'; bR.hidden = true; bR.setAttribute('aria-pressed', 'true');
   bR.innerHTML = '<span class="l-longo">Reflexo no vidro</span><span class="l-curto">Reflexo</span>';
@@ -70,6 +91,12 @@ async function criar({ container, manifesto = 'assets/render/tour360/manifesto.j
     .t360-luzes{position:absolute;right:12px;top:56px;display:flex;flex-direction:column;gap:6px}
     .t360-luzes button{padding:6px 10px;border-radius:999px;border:1px solid rgba(255,255,255,.5);background:rgba(0,0,0,.45);color:#fff;cursor:pointer}
     .t360-luzes button[aria-pressed="true"]{background:#f5c66b;color:#222;border-color:#f5c66b}
+    .t360-chips{position:absolute;inset:0;pointer-events:none;z-index:4}
+    .t360-chip{position:absolute;transform:translate(-50%,-100%);pointer-events:auto;display:inline-flex;align-items:center;gap:6px;min-height:36px;padding:0 13px;border-radius:999px;border:1px solid rgba(255,255,255,.65);background:rgba(16,18,17,.8);color:#fff;font:600 12.5px/1 system-ui,sans-serif;white-space:nowrap;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.35)}
+    .t360-chip i{font-style:normal;font-size:14px;opacity:.85}
+    .t360-aviso-sol{position:absolute;left:50%;top:104px;transform:translateX(-50%);width:max-content;max-width:min(86%,420px);padding:6px 10px;border-radius:10px;background:rgba(16,18,17,.78);color:#f4d48a;font:11.5px/1.3 system-ui,sans-serif;text-align:center;pointer-events:none;z-index:4}
+    .t360-aviso-sol[hidden]{display:none}
+    @media (max-width:760px){.t360-aviso-sol{top:200px}}
     .t360-fechar{position:absolute;right:12px;top:12px;width:36px;height:36px;border-radius:50%;border:0;background:rgba(0,0,0,.55);color:#fff;font-size:22px;cursor:pointer}`;
     document.head.appendChild(css);
   }
@@ -97,7 +124,8 @@ async function criar({ container, manifesto = 'assets/render/tour360/manifesto.j
     const geo = new THREE.SphereGeometry(RAIO, 96, 48); geo.scale(-1, 1, 1);
     const mat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 1, depthWrite: false, toneMapped: false });
     const m = new THREE.Mesh(geo, mat); m.position.copy(paraMundo(p.pos)); m.visible = false; cena.add(m);
-    const mix = new MisturaPonto(renderer, p, base, { larguraMax, SOL });
+    const mix = new MisturaPonto(renderer, p, base, { larguraMax, SOL, unidade: final != null && numero != null ? { numero: String(numero), andar, final } : null, finalRender: man.final ?? null, luzes: CENA.luzes, pufe: CENA.pufe });
+    mix.pufeNoiteCena = CENA.pufe && CENA.pufe.noite; // S2: sun of THIS unit
     // 12-bit lamp low bits arrived (render-mix.js). 13/10 Victor (R2, rings at night in the kitchen): when they landed
     // during the walk to this point (estado.ponto still the old one; cached files land in < 600 ms) the repaint was
     // skipped and the 8-bit picture stayed until the next sun move. Now the point remembers it and repaints on arrival.
@@ -198,6 +226,68 @@ async function criar({ container, manifesto = 'assets/render/tour360/manifesto.j
     const ok = v.z < 1 && Math.abs(v.x) < 1 && Math.abs(v.y) < 1;
     elVista.hidden = !ok || !!(G && G.malha.visible); // B10: with Google's city the credit pill replaces "Vista simulada"
     if (ok) { elVista.style.left = `${(v.x * 0.5 + 0.5) * 100}%`; elVista.style.top = `${(-v.y * 0.5 + 0.5) * 100}%`; }
+    atualizaChips();
+  }
+
+  // 15/10 FILA D4 (C defect 4): on phones the floor rings fell under the sun bar or were cut at the screen edge. Every
+  // neighbour point whose ring is not tappable (behind the camera, < 24 px from an edge, or under a control over the
+  // image) gets a chip just above the sun bar, with its name and the side it is on; a tap walks there (same as the ring).
+  const chipsBox = raiz.querySelector('.t360-chips');
+  const COBRE = ['#interior-sol', '#int-barra', '#interior-fechar', '.t360-luzes', '.t360-nome', '.int-luzes-barra', '.t360-rot', '.int-rodape', '#int-detalhes'];
+  let chipsSig = '', chipsAtuais = [];
+  const vC = new THREE.Vector3(), vF = new THREE.Vector3(), vD = new THREE.Vector3();
+  function atualizaChips() {
+    if (fechado) return;
+    const r = cv.getBoundingClientRect();
+    if (andando || !r.width) { if (chipsSig) { chipsSig = ''; chipsAtuais = []; chipsBox.replaceChildren(); } return; }
+    const tampas = [];
+    for (const s of COBRE) for (const el of document.querySelectorAll(s)) {
+      if (el.hidden || el.offsetParent === null) continue;
+      const q = el.getBoundingClientRect(); if (q.width && q.height) tampas.push(q);
+    }
+    const sol = document.querySelector('#interior-sol');
+    let baseY = sol && sol.offsetParent !== null && sol.getBoundingClientRect().height ? sol.getBoundingClientRect().top - 10 : r.bottom - 20;
+    for (const d of document.querySelectorAll('#interior-sol .sol-dica')) if (!d.hidden && d.offsetParent !== null) baseY = Math.min(baseY, d.getBoundingClientRect().top - 6); // the 'segure' hint sits above the bar
+    { const ri = raiz.querySelector('.t360-rot'); if (ri && ri.offsetParent !== null) { const q = ri.getBoundingClientRect(); if (q.bottom > baseY - 40) baseY = Math.min(baseY, q.top - 6); } } // and the 'i' of the image
+    camera.getWorldDirection(vF); vF.y = 0; vF.normalize();
+    const precisa = [], aneis = [];
+    for (const m of grupoHot.children) {
+      vC.copy(m.position).project(camera);
+      const x = r.left + (vC.x * 0.5 + 0.5) * r.width, y = r.top + (-vC.y * 0.5 + 0.5) * r.height, R2 = 22;
+      const naTela = vC.z < 1 && x > r.left + 24 && x < r.right - 24 && y > r.top + 24 && y < r.bottom - 24;
+      const tapado = tampas.some((q) => x + R2 > q.left && x - R2 < q.right && y + R2 > q.top && y - R2 < q.bottom);
+      if (naTela && !tapado) { aneis.push([x - r.left, y]); continue; }
+      vD.copy(m.position).sub(camera.position); vD.y = 0;
+      const ang = THREE.MathUtils.radToDeg(Math.atan2(vD.x * -vF.z + vD.z * vF.x, vD.x * vF.x + vD.z * vF.z)); // + = to the right
+      precisa.push({ id: m.userData.id, ang });
+    }
+    precisa.sort((a, b) => a.ang - b.ang);
+    const meiaFov = THREE.MathUtils.radToDeg(Math.atan(Math.tan(THREE.MathUtils.degToRad(fov / 2)) * camera.aspect));
+    const W = r.width, larg = 120;
+    let ultimoX = -1e9;
+    const lista = precisa.map((c) => {
+      let x = Math.abs(c.ang) < meiaFov ? W / 2 + (c.ang / meiaFov) * (W / 2) : (c.ang < 0 ? 0 : W);
+      x = Math.max(larg / 2 + 8, Math.min(W - larg / 2 - 8, x));
+      if (x - ultimoX < larg + 6) x = ultimoX + larg + 6;
+      ultimoX = x;
+      return { ...c, x, seta: c.ang < -12 ? '←' : c.ang > 12 ? '→' : '↓' };
+    });
+    // too many for one row: keep them inside the screen, packed from the right edge back
+    for (let k = lista.length - 1; k >= 0; k--) { const lim = W - larg / 2 - 8 - (lista.length - 1 - k) * (larg + 6); if (lista[k].x > lim) lista[k].x = lim; }
+    // a chip never sits on a ring that can be tapped: the chip row moves above it
+    for (const c of lista) for (const [ax, ay] of aneis) if (Math.abs(c.x - ax) < larg / 2 + 22 && ay > baseY - 36 - 22 && ay < baseY + 22) baseY = Math.min(baseY, ay - 28);
+    const sig = lista.map((c) => c.id + ':' + Math.round(c.x / 8) + c.seta).join('|') + '@' + Math.round(baseY);
+    if (sig === chipsSig) return;
+    chipsSig = sig; chipsAtuais = lista.map((c) => ({ id: c.id, x: r.left + c.x, y: baseY }));
+    chipsBox.replaceChildren(...lista.map((c) => {
+      const b = document.createElement('button'); b.type = 'button'; b.className = 't360-chip'; b.dataset.id = c.id;
+      b.style.left = c.x + 'px'; b.style.top = (baseY - r.top) + 'px';
+      const i = document.createElement('i'); i.textContent = c.seta; i.setAttribute('aria-hidden', 'true');
+      b.append(...(c.seta === '→' ? [PTS[c.id].nome, i] : [i, PTS[c.id].nome]));
+      b.setAttribute('aria-label', 'Ir para ' + PTS[c.id].nome);
+      b.addEventListener('click', (ev) => { ev.stopPropagation(); irPara(c.id); });
+      return b;
+    }));
   }
 
   // ---------------------------------------------------------------- walking between points
@@ -235,25 +325,28 @@ async function criar({ container, manifesto = 'assets/render/tour360/manifesto.j
   async function repinta() {
     if (pintando) { pendente = true; return pintando; }
     pintando = (async () => {
-      do { pendente = false; const e = await pinta(estado.ponto); e.m.visible = true; desenha(); } while (pendente);
+      do { pendente = false; const e = await pinta(estado.ponto); e.m.visible = true; avisoSol(e); desenha(); } while (pendente);
     })().finally(() => { pintando = null; });
     return pintando;
   }
+  // S2 (15/10): another facade than the render's and the card says the balcony has sun now -> say so instead of faking it
+  function avisoSol(e) { const a = raiz.querySelector('.t360-aviso-sol'); if (a) a.hidden = !(e.mix.outraFace() && e.mix.cvAgora(estado.estacao, estado.minutos) > 0.5); }
   function marcaLuzes() { raiz.querySelectorAll('[data-luz]').forEach((b) => b.setAttribute('aria-pressed', String(!!estado.luzes[b.dataset.luz]))); }
-  raiz.querySelectorAll('[data-luz]').forEach((b) => b.addEventListener('click', () => { estado.luzes[b.dataset.luz] = !estado.luzes[b.dataset.luz]; marcaLuzes(); repinta(); }));
+  raiz.querySelectorAll('[data-luz]').forEach((b) => b.addEventListener('click', () => { estado.luzes[b.dataset.luz] = !estado.luzes[b.dataset.luz]; guardaLuzesCliente(estado.luzes); marcaLuzes(); repinta(); }));
+  function luzesPelaHora() { if (!luzesDoCliente()) { estado.luzes = luzesAuto(estado.estacao, estado.minutos); marcaLuzes(); } } // D18c: untouched = follow the hour
   let fechado = false;
   function fechar(chamaCb = true) {
     if (fechado) return; fechado = true;
     if (G) { try { G.liberar(); } catch (e) { /* ignore */ } G = null; }
     for (const e of esferas.values()) { e.mix.liberar(); e.m.geometry.dispose(); e.m.material.dispose(); }
-    renderer.dispose(); raiz.remove(); window.removeEventListener('resize', redim);
+    renderer.dispose(); raiz.remove(); window.removeEventListener('resize', redim); chipsBox.replaceChildren();
     if (atual && atual.raiz === raiz) atual = null;
     if (chamaCb && aoFechar) aoFechar();
   }
   raiz.querySelector('.t360-fechar').addEventListener('click', () => fechar(true));
   window.addEventListener('resize', redim);
 
-  // ---------------------------------------------------------------- B10: Google 3D Tiles behind the window mask (opt-in ?google3d=1, key injected at runtime)
+  // ---------------------------------------------------------------- B10: Google 3D Tiles behind the window mask (on by default, ?google3d=0 off; key from src/g3d-chave.js)
   // Where the point's `fora` mask is white the city is drawn from Google's tiles with a camera at the panorama's real position
   // (manifest `geo`: lat, lon, h ellipsoid, rumo = bearing of the pano centre). The panorama sphere stays untouched underneath,
   // so any failure (no key, quota, error, trial ended) just removes the overlay and the current look remains, silently.
@@ -293,7 +386,7 @@ async function criar({ container, manifesto = 'assets/render/tour360/manifesto.j
       const geo = new THREE.SphereGeometry(RAIO, 96, 48); geo.scale(-1, 1, 1);
       const malha = new THREE.Mesh(geo, mat); malha.renderOrder = 3; malha.visible = false; malha.frustumCulled = false; cena.add(malha);
       const st = document.createElement('style'); st.id = 't360-g3d-css';
-      st.textContent = '.t360-g3d{position:absolute;right:10px;bottom:78px;max-width:58%;display:flex;align-items:center;gap:5px;padding:2px 6px;border-radius:6px;background:rgba(0,0,0,.45);color:#fff;font:9px/1.2 system-ui,sans-serif;pointer-events:none;white-space:nowrap;overflow:hidden}.t360-g3d[hidden]{display:none}.t360-g3d img{height:11px;width:auto;display:block;flex:none}.t360-g3d .g3d-attr{opacity:.85;overflow:hidden;text-overflow:ellipsis}.t360-g3d-carga{position:absolute;left:12px;bottom:78px;width:160px;display:flex;flex-direction:column;gap:3px;padding:4px 8px;border-radius:7px;background:rgba(0,0,0,.45);color:#fff;font:10px/1.2 system-ui,sans-serif;pointer-events:none}.t360-g3d-carga[hidden]{display:none}.t360-g3d-carga i{display:block;height:2px;border-radius:2px;background:rgba(255,255,255,.25);overflow:hidden}.t360-g3d-carga b{display:block;height:100%;width:4%;background:#fff;transition:width .4s ease}';
+      st.textContent = '.t360-g3d{position:absolute;right:10px;bottom:78px;max-width:calc(100% - 20px);pointer-events:none;overflow:visible}.t360-g3d[hidden]{display:none}@media (max-width:760px){.t360-g3d{top:92px;bottom:auto!important}.t360-g3d-carga{top:92px;bottom:auto!important;width:130px!important}}.t360-g3d-carga{position:absolute;left:12px;bottom:78px;width:160px;display:flex;flex-direction:column;gap:3px;padding:4px 8px;border-radius:7px;background:rgba(0,0,0,.45);color:#fff;font:10px/1.2 system-ui,sans-serif;pointer-events:none}.t360-g3d-carga[hidden]{display:none}.t360-g3d-carga i{display:block;height:2px;border-radius:2px;background:rgba(255,255,255,.25);overflow:hidden}.t360-g3d-carga b{display:block;height:100%;width:4%;background:#fff;transition:width .4s ease}';
       document.head.appendChild(st); raiz.appendChild(vista.credito); raiz.appendChild(vista.carga);
       const dir = new THREE.Vector3(), tam = new THREE.Vector2(), perf = { n: 0, ms: 0, max: 0 }, camV = new THREE.PerspectiveCamera();
       let atual = null, falhou = false;
@@ -368,7 +461,7 @@ async function criar({ container, manifesto = 'assets/render/tour360/manifesto.j
             const op = vista.opacidade(); mat.uniforms.forca.value = op; if (op < 1) vista.acordar(); // keep frames coming during the fade
             vista.credito.hidden = op <= 0; // the credit shows only while Google's city is on screen
             // credit + progress sit just above the image caption (the sun bar below would hide them)
-            if ((perf.n & 31) === 0) { const rot = raiz.querySelector('.t360-rot'); const topo = rot && rot.offsetParent ? rot.getBoundingClientRect().top : innerHeight - 120; const bb = Math.max(78, Math.round(raiz.getBoundingClientRect().bottom - topo + 6)) + 'px'; vista.credito.style.bottom = bb; vista.carga.style.bottom = bb; }
+            if ((perf.n & 31) === 0) { const rot = raiz.querySelector('.t360-rot'); const topo = Math.min(rot && rot.offsetParent ? rot.getBoundingClientRect().top : innerHeight - 120, ...[...raiz.querySelectorAll('.t360-chip')].map((c) => c.getBoundingClientRect().top)); /* 15/10: the Google credit never under a chip */ const bb = Math.max(78, Math.round(raiz.getBoundingClientRect().bottom - topo + 6)) + 'px'; vista.credito.style.bottom = bb; vista.carga.style.bottom = bb; }
             mat.uniforms.tG.value = vista.rt.texture; mat.uniforms.res.value.copy(tam);
             const dt = performance.now() - t0; perf.n++; perf.ms += dt; perf.max = Math.max(perf.max, dt);
             if (window.__g3d && window.__g3d.erro && /403|429|quota|key|denied|permission/i.test(window.__g3d.erro)) throw new Error(window.__g3d.erro);
@@ -390,7 +483,7 @@ async function criar({ container, manifesto = 'assets/render/tour360/manifesto.j
             vista.progressoFoto(true); // the bar stays while the picture is being made, wherever the visitor looks (Victor 08/10)
             const op = vista.opacidade(); mat.uniforms.forca.value = op; if (op < 1 && malha.visible) vista.acordar();
             vista.credito.hidden = !malha.visible || op <= 0;
-            if ((perf.n++ & 31) === 0) { const rot = raiz.querySelector('.t360-rot'); const topo = rot && rot.offsetParent ? rot.getBoundingClientRect().top : innerHeight - 120; const bb = Math.max(78, Math.round(raiz.getBoundingClientRect().bottom - topo + 6)) + 'px'; vista.credito.style.bottom = bb; vista.carga.style.bottom = bb; }
+            if ((perf.n++ & 31) === 0) { const rot = raiz.querySelector('.t360-rot'); const topo = Math.min(rot && rot.offsetParent ? rot.getBoundingClientRect().top : innerHeight - 120, ...[...raiz.querySelectorAll('.t360-chip')].map((c) => c.getBoundingClientRect().top)); /* 15/10: the Google credit never under a chip */ const bb = Math.max(78, Math.round(raiz.getBoundingClientRect().bottom - topo + 6)) + 'px'; vista.credito.style.bottom = bb; vista.carga.style.bottom = bb; }
             if (window.__g3d && window.__g3d.erro && /403|429|quota|key|denied|permission/i.test(window.__g3d.erro)) throw new Error(window.__g3d.erro);
           } catch (err) { falhou = true; malha.visible = false; vista.credito.hidden = true; try { vista.liberar(); } catch (e2) { /* ignore */ } console.warn('google3d desligado', err && err.message); }
         },
@@ -422,8 +515,8 @@ ${navigator.userAgent.slice(0, 120)}`; };
   }
 
   const api = {
-    definirHora: (m) => { estado.minutos = m; return repinta(); },
-    definirEstacao: (e) => { estado.estacao = e; return repinta(); },
+    definirHora: (m) => { estado.minutos = m; luzesPelaHora(); return repinta(); },
+    definirEstacao: (e) => { estado.estacao = e; luzesPelaHora(); return repinta(); },
     definirLuz: (n, l) => { estado.luzes[n] = !!l; marcaLuzes(); return repinta(); },
     irPara,
     olhar: (y, p = 0, f = fov) => { yaw = y; pitch = p; fov = f; aplicaCam(); desenha(); },
@@ -431,6 +524,7 @@ ${navigator.userAgent.slice(0, 120)}`; };
     hotspots: () => { const r = cv.getBoundingClientRect(); return grupoHot.children.map((m) => { const v = m.position.clone().project(camera);
       return { id: m.userData.id, x: r.left + (v.x * 0.5 + 0.5) * r.width, y: r.top + (-v.y * 0.5 + 0.5) * r.height, visivel: v.z < 1 && Math.abs(v.x) < 1 && Math.abs(v.y) < 1 }; }); },
     cursor: () => cv.className,
+    chips: () => chipsAtuais.slice(), // D4: neighbours reachable by a chip (rings not tappable from this view)
     estado: () => ({ ...estado, luzes: { ...estado.luzes }, yaw, pitch, fov, expo: esfera(estado.ponto).mix.ultimo?.expo, lG: esfera(estado.ponto).mix.ultimo?.lG, google: G ? { ...(window.__g3d || {}), ms: G.perf.n ? G.perf.ms / G.perf.n : 0, max: G.perf.max, n: G.perf.n } : null }),
     fechar: () => fechar(true),
     renderer,
