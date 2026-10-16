@@ -4,12 +4,13 @@
 //   0..~10 deg  golden hour (warm, weak, long shadows)  > ~20 deg  full day
 // Below the horizon B3's sol.json has no samples, so the elevation there comes from the NOAA solar position
 // equations (same source B3 used), for the same date, latitude/longitude and UTC-3.
+import { PREDIO_CFG } from './predio.js';
 
 const rad = Math.PI / 180;
 export const smooth = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 
 // NOAA simplified solar position. dataISO 'YYYY-MM-DD', minutos local (UTC-3), returns { el, az } in degrees.
-export function posicaoSolar(dataISO, minutos, lat = -23.59415, lon = -46.67462, fusoH = -3) {
+export function posicaoSolar(dataISO, minutos, lat = PREDIO_CFG.geo.sol.lat, lon = PREDIO_CFG.geo.sol.lon, fusoH = -3) { // C3: default = predio.json (callers pass SOL.meta.local)
   const [Y, M, D] = dataISO.split('-').map(Number);
   const inicioAno = Date.UTC(Y, 0, 1);
   const doy = Math.floor((Date.UTC(Y, M - 1, D) - inicioAno) / 86400000) + 1;

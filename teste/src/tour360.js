@@ -8,9 +8,10 @@
 // Frames: manifest points are in the plan of the unit (u, v, h metres; v toward the balcony). three.js world:
 //   X = -v, Y = h, Z = u  (pano centre = +v = -X, turning right = increasing pano u, like the Blender equirect camera).
 import { capacidade, rebaixar } from './capacidade.js';
+import { chaveLocal } from './predio.js';
 import * as THREE from 'three';
 import { SOL } from './dados-sol.js';
-import { MisturaPonto, ROTULO, LUZES, INFO } from './render-mix.js';
+import { MisturaPonto, ROTULO, INFO } from './render-mix.js';
 import { solNoInstante } from './interior-sol.js';
 
 let atual = null;
@@ -22,14 +23,15 @@ export function irPara(id) { return atual?.api.irPara(id); }
 export function estadoTour360() { return atual ? atual.api.estado() : null; }
 export function fecharTour360() { atual?.fechar(true); }
 
-const NOMES_LUZ = { teto: 'Spots do teto', abajur: 'Abajures', cortineiro: 'LED da cortina', cozinha: 'Luz da cozinha' };
-const CURTO_LUZ = { teto: 'Spots', abajur: 'Abajur', cortineiro: 'LED', cozinha: 'Cozinha' }; // phone labels
+// 15/10 FILA C8: lamp names, the start point, the lamps lit at night and the night white reference come from the manifest
+// ("cena" block of assets/render/tour360/manifesto.json); CENA is set when a tour opens
+let CENA = { luzes: [], nomesLuz: {}, curtoLuz: {}, luzesNoite: [], inicio: null, refLuz: null, pufe: {} };
 const paraMundo = ([u, v, h]) => new THREE.Vector3(-v, h, u);
 // D18c (Victor 16/10): until the client presses a lamp button, the lamps follow the hour: by day all off, at night only the
 // spots (night = sun below -2 deg, where the day/night blend of render-mix.js starts). His first press makes his set the
 // state of the visit (sessionStorage; in memory if storage is blocked): kept across hours, points, units, leaving and
 // re-entering, never changed automatically again.
-const CHAVE_LUZES = 'tabela3d-luzes-cliente';
+const CHAVE_LUZES = chaveLocal('tabela3d-luzes-cliente'); // C2: with the building id
 let luzesMemoria = null;
 function luzesDoCliente() {
   try { const o = JSON.parse(sessionStorage.getItem(CHAVE_LUZES) || 'null'); if (o && typeof o === 'object') return o; } catch (e) { /* private mode */ }
@@ -38,7 +40,7 @@ function luzesDoCliente() {
 function guardaLuzesCliente(l) { luzesMemoria = { ...l }; try { sessionStorage.setItem(CHAVE_LUZES, JSON.stringify(luzesMemoria)); } catch (e) { /* memory only */ } }
 function luzesAuto(estacao, minutos) {
   let el = -12; try { const s = solNoInstante(SOL, estacao, minutos); if (Number.isFinite(s.el)) el = s.el; } catch (e) { /* no sun data: night */ }
-  return { teto: el < -2, abajur: false, cortineiro: false, cozinha: false };
+  return Object.fromEntries(CENA.luzes.map((k) => [k, el < -2 && CENA.luzesNoite.includes(k)]));
 }
 
 async function criar({ container, manifesto = 'assets/render/tour360/manifesto.json', ponto, estacao = 'inverno', minutos = 900,
@@ -46,10 +48,11 @@ async function criar({ container, manifesto = 'assets/render/tour360/manifesto.j
   const man = typeof manifesto === 'string' ? await (await fetch(manifesto)).json() : manifesto;
   const base = typeof manifesto === 'string' ? manifesto.replace(/[^/]*$/, '') : (man.base || '');
   const PTS = Object.fromEntries(man.pontos.map((p) => [p.id, p]));
-  const REF_LUZ = (() => { const c = PTS.cozinha && PTS.cozinha.camadas && PTS.cozinha.camadas.cozinha; return c ? (c.media_dentro || c.media) : null; })();
+  CENA = { ...CENA, ...(man.cena || {}) };
+  const REF_LUZ = (() => { const r = CENA.refLuz, c = r && PTS[r.ponto] && PTS[r.ponto].camadas && PTS[r.ponto].camadas[r.camada]; return c ? (c.media_dentro || c.media) : null; })();
   // first view: the middle of the room facing the balcony when it has the new render (window mask = its own exposure +
   // Google city of the unit); otherwise the first point with a window mask; the manifest order last (07/10 Victor)
-  const pontoInicial = () => (man.pontos.find((p) => p.id === 'entrada' && p.camadas && p.camadas.fora) || man.pontos.find((p) => p.camadas && p.camadas.fora) || man.pontos[0]).id; // Victor 08/10: the tour starts at the entrance
+  const pontoInicial = () => (man.pontos.find((p) => p.id === CENA.inicio && p.camadas && p.camadas.fora) || man.pontos.find((p) => p.camadas && p.camadas.fora) || man.pontos[0]).id; // Victor 08/10: the tour starts at the entrance
   const estado = { estacao, minutos, luzes: { ...(luzesDoCliente() || luzes || luzesAuto(estacao, minutos)) }, ponto: ponto && PTS[ponto] ? ponto : pontoInicial() };
   let G = null; // B10 (ON in the published site): live layer with Google Photorealistic 3D Tiles behind the `fora` window mask; null = current behaviour
 
@@ -61,7 +64,7 @@ async function criar({ container, manifesto = 'assets/render/tour360/manifesto.j
     <button type="button" class="t360-rot" aria-label="Sobre a imagem" aria-expanded="false"><span class="t360-rot-i" aria-hidden="true">i</span><span class="t360-rot-txt">${ROTULO}</span></button>
     <div class="t360-vista" hidden>Vista simulada</div>
     <div class="t360-nome"></div>
-    <div class="t360-luzes">${LUZES.filter((k) => man.pontos.some((p) => p.camadas && p.camadas[k])).map((k) => `<button data-luz="${k}" aria-pressed="false" title="${NOMES_LUZ[k]}"><span class="l-longo">${NOMES_LUZ[k]}</span><span class="l-curto">${CURTO_LUZ[k]}</span></button>`).join('')}</div>
+    <div class="t360-luzes">${CENA.luzes.filter((k) => man.pontos.some((p) => p.camadas && p.camadas[k])).map((k) => `<button data-luz="${k}" aria-pressed="false" title="${CENA.nomesLuz[k] || k}"><span class="l-longo">${CENA.nomesLuz[k] || k}</span><span class="l-curto">${CENA.curtoLuz[k] || CENA.nomesLuz[k] || k}</span></button>`).join('')}</div>
     <button class="t360-fechar" aria-label="Fechar">×</button>
     <div class="t360-chips"></div>
     <div class="t360-aviso-sol" hidden>Esta sacada tem sol direto agora; o passeio foi feito num studio de outra face e não mostra esse sol (veja o cartão).</div>`;
@@ -121,7 +124,8 @@ async function criar({ container, manifesto = 'assets/render/tour360/manifesto.j
     const geo = new THREE.SphereGeometry(RAIO, 96, 48); geo.scale(-1, 1, 1);
     const mat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 1, depthWrite: false, toneMapped: false });
     const m = new THREE.Mesh(geo, mat); m.position.copy(paraMundo(p.pos)); m.visible = false; cena.add(m);
-    const mix = new MisturaPonto(renderer, p, base, { larguraMax, SOL, unidade: final != null && numero != null ? { numero: String(numero), andar, final } : null, finalRender: man.final ?? null }); // S2: sun of THIS unit
+    const mix = new MisturaPonto(renderer, p, base, { larguraMax, SOL, unidade: final != null && numero != null ? { numero: String(numero), andar, final } : null, finalRender: man.final ?? null, luzes: CENA.luzes, pufe: CENA.pufe });
+    mix.pufeNoiteCena = CENA.pufe && CENA.pufe.noite; // S2: sun of THIS unit
     // 12-bit lamp low bits arrived (render-mix.js). 13/10 Victor (R2, rings at night in the kitchen): when they landed
     // during the walk to this point (estado.ponto still the old one; cached files land in < 600 ms) the repaint was
     // skipped and the 8-bit picture stayed until the next sun move. Now the point remembers it and repaints on arrival.
@@ -382,7 +386,7 @@ async function criar({ container, manifesto = 'assets/render/tour360/manifesto.j
       const geo = new THREE.SphereGeometry(RAIO, 96, 48); geo.scale(-1, 1, 1);
       const malha = new THREE.Mesh(geo, mat); malha.renderOrder = 3; malha.visible = false; malha.frustumCulled = false; cena.add(malha);
       const st = document.createElement('style'); st.id = 't360-g3d-css';
-      st.textContent = '.t360-g3d{position:absolute;right:10px;bottom:78px;max-width:min(58%,300px);display:flex;flex-direction:column;align-items:flex-start;gap:3px;padding:10px 10px 5px;border-radius:8px;background:rgba(0,0,0,.5);color:#fff;font:10px/1.25 system-ui,sans-serif;pointer-events:none;white-space:normal;overflow:visible}.t360-g3d[hidden]{display:none}.t360-g3d img{height:21px;width:auto;display:block;flex:none}@media (max-width:760px){.t360-g3d{top:92px;bottom:auto!important;max-width:min(70%,300px)}.t360-g3d-carga{top:92px;bottom:auto!important;width:130px!important}}.t360-g3d-carga{position:absolute;left:12px;bottom:78px;width:160px;display:flex;flex-direction:column;gap:3px;padding:4px 8px;border-radius:7px;background:rgba(0,0,0,.45);color:#fff;font:10px/1.2 system-ui,sans-serif;pointer-events:none}.t360-g3d-carga[hidden]{display:none}.t360-g3d-carga i{display:block;height:2px;border-radius:2px;background:rgba(255,255,255,.25);overflow:hidden}.t360-g3d-carga b{display:block;height:100%;width:4%;background:#fff;transition:width .4s ease}';
+      st.textContent = '.t360-g3d{position:absolute;right:10px;bottom:78px;max-width:calc(100% - 20px);pointer-events:none;overflow:visible}.t360-g3d[hidden]{display:none}@media (max-width:760px){.t360-g3d{top:92px;bottom:auto!important}.t360-g3d-carga{top:92px;bottom:auto!important;width:130px!important}}.t360-g3d-carga{position:absolute;left:12px;bottom:78px;width:160px;display:flex;flex-direction:column;gap:3px;padding:4px 8px;border-radius:7px;background:rgba(0,0,0,.45);color:#fff;font:10px/1.2 system-ui,sans-serif;pointer-events:none}.t360-g3d-carga[hidden]{display:none}.t360-g3d-carga i{display:block;height:2px;border-radius:2px;background:rgba(255,255,255,.25);overflow:hidden}.t360-g3d-carga b{display:block;height:100%;width:4%;background:#fff;transition:width .4s ease}';
       document.head.appendChild(st); raiz.appendChild(vista.credito); raiz.appendChild(vista.carga);
       const dir = new THREE.Vector3(), tam = new THREE.Vector2(), perf = { n: 0, ms: 0, max: 0 }, camV = new THREE.PerspectiveCamera();
       let atual = null, falhou = false;

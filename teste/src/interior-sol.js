@@ -10,6 +10,7 @@
 //   For mirrored finals the layout itself is mirrored (u -> 5.40 - u), so plan -> building is always a pure rotation.
 
 import { posicaoSolar, fatorDia } from './luz-curva.js';
+import { PREDIO_CFG } from './predio.js';
 
 export const DIA = 1440;
 export const hm = (s) => { const [h, m] = s.split(':').map(Number); return h * 60 + m; };
@@ -22,25 +23,18 @@ export const fmt = (t) => {
 // Heights: B5 measured 2.81 m floor-to-floor on the drone point cloud (dados/predio-forma.json); the balcony section
 // (door height, balcony ceiling, edge beam, curb) was MEASURED on the calibrated photo of apt 31 (final 1,
 // docs/b4-scripts/calibra_fotos.py) and is assumed equal in the other finals (ESTIMATIVA).
-export const P = {
-  W: 5.40,          // room inner width (dimension "5.40" of the drawing)
-  VG: 6.14,         // glass plane of the balcony door (inner wall face 6.05, outer 6.23)
-  VI: 6.05, VO: 6.23,
-  BAL: 1.22,        // balcony depth glass -> outer edge; set per face by configurarFace() (B5)
-  VB: 6.14 + 1.22,  // outer edge of the balcony
-  G0: 0.81, G1: 4.55, // glass opening across the room, measured on the drawing (3.74 m; photo of apt 31: 3.54 m)
-  HG: 2.25,         // height of the opening: photo of apt 31 (B3 assumed 2.30)
-  HT: 2.60,         // room ceiling: 2.81 floor-to-floor (B5) - ~0.21 slab + floor (ESTIMATIVA)
-  HCB: 2.32,        // balcony ceiling (photo of apt 31)
-  HB: 2.19,         // bottom of the edge beam of the balcony (photo of apt 31; B3 assumed an open slab edge at 2.72)
-  VIGA: 0.22,       // depth of the edge beam (= curb), photo of apt 31
-  HC: 0.106,        // curb height (photo of apt 31)
-  B0: -0.10, B1: 5.50, // balcony inner width (side walls), drawing
-  PISO_A_PISO: 2.81, LAJE_1: 11.92, // B5 (dados/predio-forma.json > niveis)
-};
+// 15/10 FILA C9: the numbers live in predio.json "plantaStudio" (Upper values below, for reference):
+//   W 5.40 room inner width (dimension "5.40" of the drawing) · VG 6.14 glass plane of the balcony door (inner wall face VI
+//   6.05, outer VO 6.23) · BAL 1.22 balcony depth glass -> outer edge, set per face by configurarFace() (B5) · VB = VG + BAL
+//   outer edge · G0 0.81 / G1 4.55 glass opening across the room (drawing 3.74 m; photo of apt 31: 3.54 m) · HG 2.25 opening
+//   height (photo of apt 31) · HT 2.60 room ceiling (2.81 floor-to-floor - ~0.21, ESTIMATIVA) · HCB 2.32 balcony ceiling ·
+//   HB 2.19 bottom of the edge beam · VIGA 0.22 beam depth (= curb) · HC 0.106 curb height · B0 -0.10 / B1 5.50 balcony
+//   side walls · PISO_A_PISO 2.81, LAJE_1 11.92 (B5, dados/predio-forma.json > niveis)
+const { _leia: _p0, ...PL_ } = PREDIO_CFG.plantaStudio;
+export const P = { ...PL_, VB: PL_.VG + PL_.BAL };
 // balcony depth by face (B5 > medidas, B3 sol.json 14:17): north 1.10, street 1.50, south 1.20; east (finals 8, 9)
 // = window WITHOUT balcony (ESTIMATIVA of B5: the east side was barely filmed) -> "a conferir" on screen
-export const BAL_FACE = { N: 1.10, W: 1.50, S: 1.20, E: 0 };
+export const BAL_FACE = Object.fromEntries(Object.entries(PREDIO_CFG.faces).map(([k, v]) => [k, v.varanda])); // C4: predio.json faces (Upper N 1.10, W 1.50, S 1.20, E 0)
 export function configurarFace(lado) { P.BAL = BAL_FACE[lado] ?? 1.22; P.VB = P.VG + P.BAL; P.SEM_VARANDA = P.BAL < 0.05; return P; }
 export const alturaPiso = (andar) => P.LAJE_1 + (andar - 1) * P.PISO_A_PISO;
 
@@ -112,7 +106,7 @@ export const dirParaPlanta = (T, dx, dz) => [T.M.a * dx + T.M.c * dz, T.M.b * dx
 
 // unit vector toward the sun in the plan frame: [u, y, v]
 export function direcaoSolPlanta(SOL, T, az, el) {
-  const eixo = (SOL.meta.orientacao && SOL.meta.orientacao.eixo_x_predio_bearing_graus) || 73.4;
+  const eixo = (SOL.meta.orientacao && SOL.meta.orientacao.eixo_x_predio_bearing_graus) || PREDIO_CFG.geo.rumoSolReserva;
   const r = Math.PI / 180;
   const h = Math.cos(el * r);
   const dx = h * Math.cos((az - eixo) * r), dz = h * Math.sin((az - eixo) * r);

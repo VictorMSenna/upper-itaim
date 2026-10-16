@@ -1,5 +1,6 @@
 <!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><meta name="robots" content="noindex"><style>:root{color-scheme:light;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0;font:14px system-ui,sans-serif;background:#fafaf9}img{max-width:100%}[hidden]{display:none!important}</style><title>Tabela Upper Itaim</title>
 <meta name="description" content="Upper Itaim, R. João Cachoeira 1577: escolha seu studio no prédio em 3D, com situação, preço e WhatsApp por unidade. Tabela de outubro/2026.">
+<!-- 15/10 FILA C1: every double-brace p: marker comes from predio.json, filled when the page is built (docs/b10-scripts/publicar_cfg.py preenche_index) -->
 <link rel="icon" type="image/svg+xml" href="assets/marca/icone.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -10,17 +11,17 @@
    green-tinted balcony glass. One dark visual world on purpose (single theme). Mobile first; desktop gets
    its own composition (docked units panel on the right, split opening). */
 :root {
-  --base: #141210;          /* Geracional Pitch Black */
-  --base-2: #2c2c2a;        /* Geracional Graphite */
+  --base: #141210;          /* brand palette: predio.json marca.paleta */
+  --base-2: #2c2c2a;
   --painel: rgba(20, 18, 16, .74);
   --painel-forte: rgba(20, 18, 16, .92);
   --linha: rgba(245, 243, 239, .12);
   --linha-2: rgba(245, 243, 239, .22);
-  --texto: #f5f3ef;         /* Geracional Parchment */
+  --texto: #f5f3ef;
   --texto-2: #bdb8b0;
-  --tijolo: #ef5b2e;        /* Geracional Spicy Paprika, main action */
+  --tijolo: #ef5b2e;        /* main action */
   --tijolo-2: #f3784f;
-  --amaranto: #8b1a3a;      /* Geracional Dark Amaranth */
+  --amaranto: #8b1a3a;
   --vidro: #8fb8a9;         /* balcony glass, secondary accent */
   --disp: #009e73;          /* status colours (Okabe-Ito, legend G-D5) */
   --disp-txt: #46d6a9;
@@ -156,7 +157,7 @@ h1, h2, h3 { margin: 0; text-wrap: balance; }
 .foto-svg .un:focus-visible { outline: none; }
 .foto-svg .un.fora .vidro { opacity: .15; }
 /* night (F20): the warm light lives inside the glass: the unlit photo, warm-graded, clipped to lit units */
-.foto-svg { display: none; } /* F27: Foto = photo-only showcase (65 of 117 units visible would mislead) */
+.foto-svg { display: none; } /* F27: Foto = photo-only showcase (a photo shows only part of the units: misleading) */
 .foto-escolher { position: absolute; z-index: 5; left: 50%; transform: translateX(-50%); bottom: calc(env(safe-area-inset-bottom, 0px) + var(--legal-h) + 74px); border: 0; border-radius: 999px; padding: 12px 22px; font: 600 15px/1 'Archivo', system-ui, sans-serif; color: #15130f; background: #f2c14e; box-shadow: 0 6px 22px rgba(0,0,0,.35); cursor: pointer; }
 .foto-escolher:hover { background: #ffd36b; }
 .foto-escolher:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
@@ -495,11 +496,11 @@ body.revisao .aviso-revisao { display: block !important; }
 <script type="importmap">
 {
   "imports": {
-    "three": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.min.js",
-    "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.core.js": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.core.min.js",
-    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.186.1/examples/jsm/",
-    "camera-controls": "https://cdn.jsdelivr.net/npm/camera-controls@3.1.2/dist/camera-controls.module.min.js",
-    "detect-gpu": "https://cdn.jsdelivr.net/npm/detect-gpu@5.0.70/dist/detect-gpu.esm.js"
+    "three": "./src/vendor/three@0.186.1/build/three.module.min.js",
+    "./src/vendor/three@0.186.1/build/three.core.js": "./src/vendor/three@0.186.1/build/three.core.min.js",
+    "three/addons/": "./src/vendor/three@0.186.1/examples/jsm/",
+    "camera-controls": "./src/vendor/camera-controls@3.1.2/dist/camera-controls.module.min.js",
+    "detect-gpu": "./src/vendor/detect-gpu@5.0.70/dist/detect-gpu.esm.js"
   }
 }
 </script>
@@ -553,7 +554,7 @@ body.revisao .aviso-revisao { display: block !important; }
   <div class="folha-alca" aria-hidden="true"></div>
   <div class="folha-cab">
     <div class="u-titulo">
-      <h2>117 studios</h2>
+      <h2 id="u-total"></h2>
       <div class="u-resumo" id="resumo"></div>
     </div>
     <button type="button" class="x" id="unidades-fechar" aria-label="Fechar a lista">×</button>

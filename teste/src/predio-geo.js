@@ -39,8 +39,8 @@ export function construirPredio(THREE, { forma, materiais = {}, sombras = true, 
   const caixas = {}; // nome -> [[x0,y0,z0,x1,y1,z1], ...]
   const add = (mat, c) => { (caixas[mat] ||= []).push(c); };
   for (const v of forma.volumes) add(v.material, v.caixa);
-  for (const p of forma.pilares) add(p.material, p.caixa);
-  for (const k of forma.lajes_internas.niveis) {
+  for (const p of forma.pilares || []) add(p.material, p.caixa); // C7: optional
+  for (const k of forma.lajes_internas?.niveis || []) { // C7: optional
     const y = nivel(k);
     for (const [x0, z0, x1, z1] of forma.lajes_internas.retangulos_xz) add(forma.lajes_internas.material, [x0, y - LAJE, z0, x1, y, z1]);
   }
@@ -58,8 +58,12 @@ export function construirPredio(THREE, { forma, materiais = {}, sombras = true, 
       add('metal', [g[0] - 0.01, y + GC - 0.04, g[2] - 0.01, g[3] + 0.01, y + GC + 0.01, g[5] + 0.01]);
     }
   }
-  // glass railing on the west-wing roof terrace (above the stone parapet)
-  {
+  // glass railing on the west-wing roof terrace (above the stone parapet). 15/10 FILA C7: OPTIONAL volume - a building
+  // whose predio-forma.json lacks these measures (no such terrace) still builds; before, it threw a TypeError and the model
+  // fell back to "sem 3D"
+  const M_ = forma.medidas || {};
+  const temTerraco = ['ala_oeste_parapeito_topo_y', 'ala_oeste_guarda_corpo_topo_y', 'ala_oeste_parede_norte_z', 'ala_oeste_parede_sul_z', 'bloco_central_x0'].every((k) => M_[k] && Number.isFinite(M_[k].valor));
+  if (temTerraco) {
     const y0 = forma.medidas.ala_oeste_parapeito_topo_y.valor, y1 = forma.medidas.ala_oeste_guarda_corpo_topo_y.valor;
     const z0 = forma.medidas.ala_oeste_parede_norte_z.valor, z1 = forma.medidas.ala_oeste_parede_sul_z.valor;
     const xe = forma.medidas.bloco_central_x0.valor - 1.5;

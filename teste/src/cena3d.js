@@ -4,6 +4,7 @@
 // large radius and only above the horizon (F3/F6), draggable sun (F5), tap = that exact unit (F8),
 // hover cursor + label (F12), loop that never sleeps while there is input (F10).
 import { capacidade, rebaixar } from './capacidade.js';
+import { PREDIO_CFG } from './predio.js';
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import CameraControls from 'camera-controls';
@@ -78,6 +79,7 @@ export function criarCena({ container, predio, unidades, teste = false,
     return teto + (Math.min(e, 90) - 12) * (topo - teto) / 78;
   };
   let largura = 1, altura = 1;
+  let solBorda = null; // D13 edge marker of the sun (created on first use, see marcaSolBorda)
   const stats = { quadros: 0, calls: 0, triangles: 0, geometries: 0, textures: 0, pronto: false };
   const clock = { t: performance.now(), getDelta() { const n = performance.now(); const d = (n - this.t) / 1000; this.t = n; return Math.min(d, 0.25); } };
   let rafId = 0, sujo = true, ociosos = 0;
@@ -224,12 +226,10 @@ export function criarCena({ container, predio, unidades, teste = false,
   matUnidade.customProgramCacheKey = () => 'unidade-e5';
   // E5: B7's filler boxes (piers between units, slab bands between floors) join B5's volumes (same material batches,
   // no extra draw calls)
+  // 15/10 FILA C9: tower colours from predio.json "materiais" (Upper: E5c, medians of the lit faces in DJI_0201); same order
+  const { _leia: _m0, ...MAT_ } = PREDIO_CFG.materiais;
   const PB = construirPredio(THREE, { forma: FORMA, linhas: true, materiais: {
-    branco: '#c2bdb3',      // E5c: cream piers (DJI_0201, lit)  — was #9a968f      // exposed concrete: medium grey-brown (sunlit #bfbfc0 overexposed, shade #605c5b)
-    pedra: '#a4a5a8',       // E5c: slab edges, uniform light grey (DJI_0201) — was #aca79f       // slab edges / stone bands
-    embasamento: '#919297', // stone box under the units: median of its lit face in DJI_0201 (was #55575b, read as black)
-    tijolo: '#4f3938',      // purple-brown brick crown (sunlit median #4e3837)
-    cornija: '#3c3938', cobertura: '#3e3d3f', bege: '#8a7f6f',
+    ...MAT_,
     unidade: matUnidade,    // white so instanceColor shows the status colour exactly
   } });
   scene.add(PB.grupo);
@@ -241,7 +241,7 @@ export function criarCena({ container, predio, unidades, teste = false,
   // E5: B7's fillers (piers between units, slab bands between floors) as two extra instanced meshes (own meshes, so
   // B5's meshes keep the instance counts the facade photo bake was made for). Colours from the drone photo.
   {
-    const CORES = { branco: '#cdc5b8', pedra: '#b9b2a6' }; // cream concrete of the piers / slab edges (DJI_0201/0199, sunlit)
+    const CORES = PREDIO_CFG.materiaisEnchimento; // C9: cream concrete of the piers / slab edges (predio.json; Upper DJI_0201/0199, sunlit)
     for (const mat of ['branco', 'pedra']) {
       const lista = CONTINUO.filter((c) => c.material === mat);
       if (!lista.length) continue;
@@ -273,8 +273,9 @@ export function criarCena({ container, predio, unidades, teste = false,
   const nossoCarregou = () => { if ((entB7.carregado || !DRONE) && (b7.fachada || !b7Ativo('fachada'))) avisaNosso(); };
   if (!/[?&]google3d=0/.test(location.search)) nossoPronto.then(() => import('./google-vista.js')).then(async (gm) => {
     // origin of the B5 plan (sidewalk NW corner, y = 0): LiDAR-registered (b7 quadro.py); h = LiDAR 736.39 m + geoid N (-3.5 m, calibrated in RELATORIO-B10)
-    const lote = await fetch('assets/predio/lote-1577.json').then((r) => (r.ok ? r.json() : null)).catch(() => null); // GeoSampa lot of the tower (08/10)
-    gCena = await gm.ligarGoogleCena({ scene, camera, renderer, ref: { lat: -23.5939395, lon: -46.6747339, h: 732.89, rumoX: 73.36 /* 15/10 audit S1: true north (71.67 = UTM grid bearing, Google city turned ~1.7 deg) */ }, aoMudar: () => pedirRender(), recorte: (() => { const bx = new THREE.Box3().setFromObject(PB.grupo); bx.min.x -= 2.2; bx.min.z -= 2.2; bx.max.x += 2.2; bx.max.z += 2.2; /* 07/10: the real building's balconies stuck out of 0.8 m */ bx.min.y = 3.5 /* 07/10: keeps Google's ground around the tower (0.3 m showed our 2020 construction-site photo as a grey stain) */; bx.max.y += 3; if (lote && lote.b5_xz) { bx.lote = lote.b5_xz; bx.margemLote = 1.5; } return bx; })(),
+    const G_ = PREDIO_CFG.geo, RT_ = G_.recorteTorre; // 15/10 FILA C3/C9: origin, bearing, lot and cut box from predio.json
+    const lote = await fetch(G_.lote).then((r) => (r.ok ? r.json() : null)).catch(() => null); // GeoSampa lot of the tower (08/10)
+    gCena = await gm.ligarGoogleCena({ scene, camera, renderer, ref: { ...G_.origemGoogle, rumoX: G_.rumoX /* 15/10 audit S1: 73.36 true north (71.67 = UTM grid bearing, Google city turned ~1.7 deg) */ }, aoMudar: () => pedirRender(), recorte: (() => { const bx = new THREE.Box3().setFromObject(PB.grupo); bx.min.x -= RT_.inflar; bx.min.z -= RT_.inflar; bx.max.x += RT_.inflar; bx.max.z += RT_.inflar; /* 07/10: the real building's balconies stuck out of 0.8 m */ bx.min.y = RT_.desdeY /* 07/10: keeps Google's ground around the tower (0.3 m showed our 2020 construction-site photo as a grey stain) */; bx.max.y += RT_.acimaDoTopo; if (lote && lote.b5_xz) { bx.lote = lote.b5_xz; bx.margemLote = G_.margemLote; } return bx; })(),
       mostrar: () => { chao.visible = rua.visible = !entB7.carregado; if (entB7.grupo) { entB7.grupo.visible = !!entB7.carregado; if (b7SoSombra) voltaB7(); } pedirRender(); } });
     if (gCena && solEstado.ultimo) gCena.definirSol(solEstado.ultimo.el);
     if (gCena && preJanela) gCena.preCarregar(preJanela);
@@ -318,11 +319,11 @@ export function criarCena({ container, predio, unidades, teste = false,
   scene.add(chao);
   // F24: the street was a 9 x 1600 m plane that turned yellow-brown at night and read as a light beam. Now a dark
   // asphalt street of the block's length with a sidewalk on each side; dark at night. Hidden once B7 loads.
-  const COMPR_RUA = 300;
+  const RUA_ = PREDIO_CFG.rua, COMPR_RUA = RUA_.comprimento; // C9: predio.json (Upper: street 7 m off the -x face, 9 m wide)
   const rua = new THREE.Group();
-  const asfalto = new THREE.Mesh(new THREE.PlaneGeometry(9, COMPR_RUA), matRua);
-  asfalto.position.set(BX0 - 7, 0.02, CZ);
-  const calcadas = [BX0 - 1.25, BX0 - 12.75].map((x) => { const m = new THREE.Mesh(new THREE.PlaneGeometry(2.5, COMPR_RUA), matCalcada); m.position.set(x, 0.04, CZ); return m; });
+  const asfalto = new THREE.Mesh(new THREE.PlaneGeometry(RUA_.largura, COMPR_RUA), matRua);
+  asfalto.position.set(BX0 - RUA_.distancia, 0.02, CZ);
+  const calcadas = [BX0 - RUA_.distancia + RUA_.largura / 2 + RUA_.calcada / 2, BX0 - RUA_.distancia - RUA_.largura / 2 - RUA_.calcada / 2].map((x) => { const m = new THREE.Mesh(new THREE.PlaneGeometry(RUA_.calcada, COMPR_RUA), matCalcada); m.position.set(x, 0.04, CZ); return m; });
   [asfalto, ...calcadas].forEach((m) => { m.rotation.x = -Math.PI / 2; m.receiveShadow = true; m.raycast = () => {}; rua.add(m); });
   scene.add(rua);
   // Victor 22:0x: the OSM blocks are not georeferenced to this street and sat on it. The street is not shown at all:
@@ -939,12 +940,58 @@ export function criarCena({ container, predio, unidades, teste = false,
     rotulosHora.forEach((sp) => { if (sp.userData.pt) sp.position.copy(sp.userData.pt.d).multiplyScalar(RAIO_CEU * 1.06); });
     if (solEstado.ultimo && solEstado.ultimo.el > -2) dirDisco = direcao(solEstado.ultimo.az, elevDesenho(solEstado.ultimo.az, solEstado.ultimo.el));
   }
+  // 15/10 22h wave 1 (D13 follow-up): when the sun disc is not on the free part of the screen (camera very high: it left
+  // through the top; start view with the sun behind the viewer, D12), a small sun marker sits on the edge of the free area,
+  // on the side where the sun is, with an arrow pointing to it; never over the buttons/panels (SELETORES_SOBRE). Tapping
+  // it frames the sun (an explicit request, F33).
+  function criaSolBorda() {
+  solBorda = document.createElement('button');
+  solBorda.type = 'button'; solBorda.className = 'sol-borda'; solBorda.hidden = true;
+  solBorda.setAttribute('aria-label', 'O sol está fora da tela: toque para enquadrar o sol');
+  solBorda.title = 'Sol fora da tela: toque para ver';
+  solBorda.style.cssText = 'position:absolute;left:0;top:0;z-index:4;width:30px;height:30px;margin:-15px 0 0 -15px;padding:0;border:0;border-radius:50%;cursor:pointer;background:radial-gradient(circle,#ffe08a 0 38%,#ffcf5c 39% 46%,rgba(255,207,92,.35) 47% 70%,rgba(255,207,92,0) 71%);-webkit-tap-highlight-color:transparent';
+  solBorda.innerHTML = '<i style="position:absolute;left:50%;top:50%;width:0;height:0;margin:-5px 0 0 13px;border:5px solid transparent;border-left:7px solid #ffcf5c;filter:drop-shadow(0 0 1px rgba(0,0,0,.6));transform-origin:-13px 5px"></i>';
+  solBorda.addEventListener('click', (e) => { e.stopPropagation(); enquadrarSol(true); });
+  container.appendChild(solBorda);
+  }
+  const vBorda = new THREE.Vector3();
+  function marcaSolBorda() {
+    if (!solBorda) criaSolBorda();
+    if (!arco.visible || !disco.visible || modoJanela) { solBorda.hidden = true; return; }
+    if (performance.now() - rectsT > 250) lerRectsSobre();
+    vBorda.copy(disco.position).applyMatrix4(camera.matrixWorldInverse);
+    const atras = vBorda.z > -1e-3;
+    vBorda.applyMatrix4(camera.projectionMatrix);
+    let sx = (vBorda.x * 0.5 + 0.5) * largura, sy = (-vBorda.y * 0.5 + 0.5) * altura;
+    const m = 22, W = largura - desloc.x, Hh = altura - desloc.y;
+    const tapa = (x, y) => rectsSobre.some(([a, b, c, d]) => x > a && x < c && y > b && y < d);
+    if (!atras && sx > m && sx < W - m && sy > m && sy < Hh - m && !tapa(sx, sy)) { solBorda.hidden = true; return; }
+    const cx = W / 2, cy = Hh / 2;
+    let dx, dy, px, py, ux, uy;
+    if (atras) {
+      // behind the viewer: on the left or right edge (the way to turn), in the sky third of the free area; the arrow
+      // points sideways; it slides down (never over the controls)
+      const lado = vBorda.x >= 0 ? 1 : -1; // NDC x of a point behind the camera is mirrored
+      dx = -lado; dy = 0; px = dx > 0 ? W - m : m; py = Math.max(m, Hh * 0.3); ux = 0; uy = -1;
+    } else {
+      dx = sx - cx; dy = sy - cy;
+      if (Math.abs(dx) < 1e-6 && Math.abs(dy) < 1e-6) dy = -1;
+      const t = Math.min(dx ? ((dx > 0 ? W - m : m) - cx) / dx : Infinity, dy ? ((dy > 0 ? Hh - m : m) - cy) / dy : Infinity);
+      px = cx + dx * t; py = cy + dy * t;
+      const len = Math.hypot(dx, dy); ux = dx / len; uy = dy / len;
+    }
+    for (let k = 0; k < 80 && tapa(px, py); k++) { px -= ux * 8; py -= uy * 8; } // slide until clear of the controls
+    solBorda.style.transform = `translate(${Math.round(px)}px,${Math.round(py)}px)`;
+    solBorda.firstChild.style.transform = `rotate(${Math.atan2(dy, dx)}rad)`;
+    solBorda.hidden = false;
+  }
   function seguirCamera() {
-    if (!arco.visible) return;
+    if (!arco.visible) { if (solBorda) solBorda.hidden = true; return; }
     arco.position.copy(CENTRO_ARCO); // F39: finite arc centred on the building (D13: on its top)
     const ch = [camera.position.x, camera.position.y, camera.position.z].map((v) => Math.round(v * 2)).join() + '|' + largura + 'x' + altura + '|' + desloc.x + ',' + desloc.y;
     if (ch !== chaveCamEl) { chaveCamEl = ch; remapearArco(); }
     if (dirDisco) disco.position.copy(CENTRO_ARCO).addScaledVector(dirDisco, RAIO_CEU);
+    marcaSolBorda();
     return;
     // eslint-disable-next-line no-unreachable
     // pitch of the view + half the vertical lens = elevation of the top edge of the frame
@@ -1120,25 +1167,39 @@ export function criarCena({ container, predio, unidades, teste = false,
       const k = Math.round((s.t - hm(e.inicio)) / (SOLd.meta.passo_min || 15));
       if (k >= 0 && k < e.el.length && e.el[k] > 0) outros.push([e.az[k], e.el[k]]);
     }
+    // 15/10 22h wave 1 (Victor, D12 follow-up: facing the sun put the city in backlight on phones, bluer): the start view now
+    // shows the LIT face. Hard rule: the camera stands on the sun's side, at most 70 deg from the sun's azimuth (sun behind
+    // or beside the viewer). Among those views: the same hour of the other seasons lit too (season changes never move the
+    // camera), as much of the arc on screen as possible (decision 8; the disc itself, behind the viewer, is shown by the
+    // edge marker of D13), the sun about 45 deg beside-behind (lit face with relief; sun straight behind put the disc,
+    // on its arc around the tower, huge next to the camera: rejected), and the least turn from the old start azimuth.
+    // On 15/10 (spring 09:00, sun az 67.7 in the scene) this gives azimuth 49.6, sun 46 deg beside-behind, 4/4 seasons lit, 16/49 arc points on screen; the other side of the sun (139.6) shows no arc at all (decision 8). Target and distance never change (F17: tower centred and highlighted).
     const az0 = VISTAS.inicio.az;
+    const horiz = (v) => { v.y = 0; return v.normalize(); };
+    const hSol = horiz(direcao(s.az, 0)), hOutros = outros.map(([a]) => horiz(direcao(a, 0)));
+    const COS_MAX = Math.cos(THREE.MathUtils.degToRad(70)), COS_OUTRO = Math.cos(THREE.MathUtils.degToRad(80));
+    const vCamH = new THREE.Vector3();
     let melhor = null;
-    for (const pol of [POL.inicio, (POL.inicio + POL.max) / 2, POL.max]) {
+    for (const pol of [POL.inicio, (POL.inicio + POL.max) / 2]) {
       for (let k = 0; k < 72; k++) {
         const az = az0 + (k * Math.PI) / 36;
         esfIni.set(dist, pol, az);
         camera.position.copy(alvo).add(vIni.setFromSpherical(esfIni)); camera.lookAt(alvo); camera.updateMatrixWorld();
-        const q = naTela(ponto(s.az, s.el));
-        if (!livre(q)) continue;
-        const centro = 1 - Math.min(1, Math.hypot((q[0] - (x0 + x1) / 2) / (x1 - x0), (q[1] - (y0 + y1) / 2) / (y1 - y0)) * 2);
-        const nOutros = outros.filter(([a, e]) => dentro(ponto(a, e))).length;
+        horiz(vCamH.copy(camera.position).sub(alvo));
+        const cosA = vCamH.dot(hSol);
+        if (cosA < COS_MAX) continue;
+        const nOutros = hOutros.filter((h) => vCamH.dot(h) >= COS_OUTRO).length;
         const nArco = arcoPts.filter((x) => dentro(ponto(x.az, x.el))).length;
+        const pDisco = ponto(s.az, s.el), disco = dentro(pDisco);
+        if (disco && camera.position.distanceTo(pDisco) < RAIO_CEU * 0.9) continue; // the disc would hang huge next to the camera
+        const alfaG = THREE.MathUtils.radToDeg(Math.acos(Math.min(1, cosA)));
         const desvio = Math.abs(Math.atan2(Math.sin(az - az0), Math.cos(az - az0)));
-        const nota = nOutros + nArco / arcoPts.length + 0.5 * centro - desvio * 0.05 - (pol - POL.inicio) * 0.5;
-        if (!melhor || nota > melhor.nota) melhor = { nota, az, pol, nOutros, nArco };
+        const nota = 2 * (outros.length ? nOutros / outros.length : 1) + nArco / arcoPts.length + 0.6 * (1 - Math.abs(alfaG - 45) / 45) - desvio * 0.05 - (pol - POL.inicio) * 0.5;
+        if (!melhor || nota > melhor.nota) melhor = { nota, az, pol, nOutros, nArco, disco, alfa: Math.acos(Math.min(1, cosA)) };
       }
-      if (melhor && melhor.nOutros === outros.length) break; // every season fits at this height: do not lower the camera
+      if (melhor && melhor.nArco > 0) break; // part of the arc on screen at this height: do not lower the camera
     }
-    estado.enquadramentoInicial = melhor && { az: +THREE.MathUtils.radToDeg(melhor.az).toFixed(1), outrasEstacoes: `${melhor.nOutros}/${outros.length}`, arco: `${melhor.nArco}/${arcoPts.length}` };
+    estado.enquadramentoInicial = melhor && { az: +THREE.MathUtils.radToDeg(melhor.az).toFixed(1), solAoLado: +THREE.MathUtils.radToDeg(melhor.alfa).toFixed(1), outrasEstacoesIluminadas: `${melhor.nOutros}/${outros.length}`, arco: `${melhor.nArco}/${arcoPts.length}`, discoNoQuadro: melhor.disco };
     camera.position.copy(pos0); camera.quaternion.copy(q0); camera.updateMatrixWorld();
     if (!melhor) return;
     controls.rotateTo(melhor.az, melhor.pol, false);

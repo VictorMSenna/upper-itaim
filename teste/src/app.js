@@ -7,6 +7,7 @@ aplicarCoresCss(); // F38: legend dots and grid cells use the same state colours
 import { CONFIG } from './config.js';
 import { META, UNIDADES, PREDIO } from './dados.js';
 import { brl, brlCurto, m2, dataBR, STATUS, POSICAO, PLANTA, el, texto } from './util.js';
+import { PREDIO_CFG } from './predio.js';
 import { abrirTour } from './tour.js';
 
 const params = new URLSearchParams(location.search);
@@ -19,12 +20,14 @@ const desktop = () => window.matchMedia('(min-width: 1000px)').matches;
 const porId = new Map(UNIDADES.map((u) => [u.id, u]));
 const porNumero = new Map(UNIDADES.map((u) => [u.numero, u]));
 const N = PREDIO.andares_venda;
+// 15/10 FILA C4: the finals come from the units table (Upper: 1..9), never a fixed 9
+const FINAIS = [...new Set(UNIDADES.map((u) => u.final))].sort((a, b) => a - b);
 const falta = (v) => typeof v === 'string' && v.includes('[falta');
 
 const app = {
   cena: null, modo3d: 'carregando', motivoSem3d: null, vista: '3d', temFoto: false,
   andar: null, unidade: null, CONFIG,
-  filtro: { de: 1, ate: N, precoMax: null, finais: new Set([1, 2, 3, 4, 5, 6, 7, 8, 9]), soDisp: false },
+  filtro: { de: 1, ate: N, precoMax: null, finais: new Set(FINAIS), soDisp: false },
 };
 window.__app = app;
 if (REVISAO) document.body.classList.add('revisao');
@@ -46,6 +49,7 @@ function preencherTextos() {
   });
   const partes = CONFIG.nome.split(' ');
   $('#ab-nome').replaceChildren(partes.slice(0, -1).join(' ') + (partes.length > 1 ? ' ' : ''), el('span', { text: partes.at(-1) }));
+  $('#u-total').textContent = `${UNIDADES.length} ${CONFIG.tipologiaPlural}`; // C1: was a fixed "117 studios" in index.html
   $('#ab-disp').textContent = META.contagem.disponivel;
   const precos = UNIDADES.filter((u) => u.preco_total).map((u) => u.preco_total);
   $('#ab-preco').textContent = 'R$ ' + (Math.min(...precos) / 1e6).toLocaleString('pt-BR', { maximumFractionDigits: 2 }) + ' mi';
@@ -64,7 +68,7 @@ function passaFiltro(u) {
 }
 function filtroAtivo() {
   const F = app.filtro;
-  return F.de !== 1 || F.ate !== N || F.precoMax != null || F.finais.size !== 9 || F.soDisp;
+  return F.de !== 1 || F.ate !== N || F.precoMax != null || F.finais.size !== FINAIS.length || F.soDisp;
 }
 function montarFiltros() {
   const selDe = $('#f-de'), selAte = $('#f-ate'), selPreco = $('#f-preco');
@@ -73,7 +77,7 @@ function montarFiltros() {
   const precos = [...new Set(UNIDADES.filter((u) => u.preco_total).map((u) => u.preco_total))].sort((a, b) => a - b);
   selPreco.append(el('option', { value: '', text: 'qualquer' }));
   precos.forEach((p) => selPreco.append(el('option', { value: p, text: `até ${brlCurto(p)}` })));
-  for (let f = 1; f <= 9; f++) {
+  for (const f of FINAIS) {
     $('#f-finais').append(el('button', { type: 'button', class: 'chip-final', 'aria-pressed': 'true', title: POSICAO[f],
       onclick: (e) => {
         if (app.filtro.finais.has(f)) app.filtro.finais.delete(f); else app.filtro.finais.add(f);
@@ -86,7 +90,7 @@ function montarFiltros() {
   selPreco.addEventListener('change', () => { app.filtro.precoMax = selPreco.value ? +selPreco.value : null; aplicarFiltro(); });
   $('#f-disp').addEventListener('change', (e) => { app.filtro.soDisp = e.target.checked; aplicarFiltro(); });
   $('#f-limpar').addEventListener('click', () => {
-    app.filtro = { de: 1, ate: N, precoMax: null, finais: new Set([1, 2, 3, 4, 5, 6, 7, 8, 9]), soDisp: false };
+    app.filtro = { de: 1, ate: N, precoMax: null, finais: new Set(FINAIS), soDisp: false };
     selDe.value = 1; selAte.value = N; selPreco.value = ''; $('#f-disp').checked = false;
     document.querySelectorAll('.chip-final').forEach((b) => b.setAttribute('aria-pressed', 'true'));
     aplicarFiltro();
@@ -104,7 +108,7 @@ function aplicarFiltro() {
 function montarGrade() {
   const g = $('#grade');
   g.append(el('div', { class: 'gh', text: '' }));
-  for (let f = 1; f <= 9; f++) g.append(el('div', { class: 'gh', title: POSICAO[f], text: `F${f}` }));
+  for (const f of FINAIS) g.append(el('div', { class: 'gh', title: POSICAO[f], text: `F${f}` }));
   for (let a = N; a >= 1; a--) {
     g.append(el('div', { class: 'gl', 'data-andar': a, 'aria-hidden': 'true' }, `${a}º`)); // F37: no floor selection
     UNIDADES.filter((u) => u.andar === a).forEach((u) => {
@@ -202,11 +206,11 @@ function abrirUnidade(id) {
   const corpo = $('#card-corpo');
   corpo.replaceChildren(
     el('figure', { class: 'cd-foto', style: 'margin:6px 0 14px', onclick: () => abrirGaleria(0) },
-      el('img', { src: CONFIG.fotos2026.lista[0].arq, alt: 'Studio mobiliado do prédio (2026)', loading: 'lazy', width: 900, height: 1600 }),
+      el('img', { src: CONFIG.fotos2026.lista[0].arq, alt: CONFIG.fotos2026.altCard, loading: 'lazy', width: 900, height: 1600 }),
       el('figcaption', { text: CONFIG.tour.legendaCard })),
-    el('p', { class: 'cd-preco' }, temPreco ? brl(u.preco_total).replace(',00', '') : 'Fora da tabela de outubro',
+    el('p', { class: 'cd-preco' }, temPreco ? brl(u.preco_total).replace(',00', '') : CONFIG.foraDaTabela,
       el('small', { text: temPreco ? `ato de 30% em ${dataBR(u.ato.data)} + 70% em ${dataBR(u.parcela.data)}` : 'Situação a confirmar com o corretor' })),
-    el('p', { class: 'cd-meta', text: `${m2(u.area_m2)} · ${u.vaga ?? 1} vaga · studio mobiliado` }),
+    el('p', { class: 'cd-meta', text: `${m2(u.area_m2)} · ${u.vaga ?? 1} vaga · ${CONFIG.tipologia}` }),
     el('p', { class: 'cd-sol1', id: 'cd-sol-linha' }, el('span', { class: 'sol-ico', 'aria-hidden': 'true' }), el('span', { text: 'Sol na sacada…' })),
     el('div', { class: 'cd-acoes' },
       el('a', { class: 'btn-pri', href: linkWhatsapp(u), target: '_blank', rel: 'noopener', id: 'btn-wa' },
@@ -215,9 +219,9 @@ function abrirUnidade(id) {
       b7Ativo('interiorProcedural')
         ? el('button', { type: 'button', class: 'btn-sec', id: 'btn-interior', onclick: () => entrarApartamento(u.id) }, 'Entrar no apartamento')
         : null,
-      el('button', { type: 'button', class: 'btn-sec', id: 'btn-splat', hidden: true, title: 'Passeio real de um studio do prédio (vídeo de 2026)', onclick: () => entrarApartamento(u.id) },
-        'Entrar no apartamento (vídeo real)', el('small', { class: 'btn-sub', text: 'de um studio do prédio · vídeo de 2026' })),
-      numeroWa.length >= 10 ? null : el('p', { class: 'cd-wa-nota so-revisao' }, texto('[falta: número do WhatsApp do Hugo]'))),
+      el('button', { type: 'button', class: 'btn-sec', id: 'btn-splat', hidden: true, title: CONFIG.tour.botaoVideoTitulo, onclick: () => entrarApartamento(u.id) },
+        CONFIG.tour.botaoVideo, el('small', { class: 'btn-sub', text: CONFIG.tour.botaoVideoSub })),
+      numeroWa.length >= 10 ? null : el('p', { class: 'cd-wa-nota so-revisao' }, texto(CONFIG.faltaWhatsapp))),
     el('details', { class: 'detalhes', id: 'detalhes' },
       el('summary', { text: 'Ver detalhes' }),
       el('div', { class: 'det-corpo' },
@@ -227,23 +231,19 @@ function abrirUnidade(id) {
             el('li', {}, el('span', { text: `Ato · ${u.ato.pct}%` }), el('span', { class: 'mono', text: brl(u.ato.valor) }), el('small', { text: `em ${dataBR(u.ato.data)}` })),
             el('li', {}, el('span', { text: `Parcela única · ${u.parcela.pct}%` }), el('span', { class: 'mono', text: brl(u.parcela.valor) }), el('small', { text: `em ${dataBR(u.parcela.data)}` })),
             el('li', {}, el('span', { text: 'R$ por m²' }), el('span', { class: 'mono', text: brl(u.preco_m2) })))) : null,
-        el('ul', { class: 'avisos' },
-          el('li', { text: 'Preço varia por andar e posição.' }),
-          el('li', { text: 'Escritura e ITBI por conta do comprador.' }),
-          el('li', { text: 'Valor inclui parte da corretagem; a tabela pode mudar sem aviso prévio.' }),
-          el('li', { text: 'Imóvel pronto, mobiliado e em operação de locação.' })),
+        el('ul', { class: 'avisos' }, ...CONFIG.avisosCard.map((t) => el('li', { text: t }))),
         el('section', { class: 'det-bloco' }, el('h3', { text: 'Planta' }),
-          planta ? el('div', { class: `planta-box ${planta.tipo}` }, el('img', { src: 'assets/planta/planta-final-6.webp', alt: 'Planta ilustrativa do studio', loading: 'lazy', width: 700, height: 900 }))
+          planta ? el('div', { class: `planta-box ${planta.tipo}` }, el('img', { src: CONFIG.planta.arquivo, alt: CONFIG.planta.alt, loading: 'lazy', width: CONFIG.planta.largura, height: CONFIG.planta.altura }))
             : el('div', { class: 'planta-falta' }, 'Planta deste final em breve'),
           el('p', { class: 'legenda-pequena', text: planta ? planta.texto + ' Ilustração artística.' : `Posição: ${POSICAO[u.final]}.` })),
         el('section', { class: 'det-bloco', id: 'det-sol' }),
-        el('section', { class: 'det-bloco' }, el('h3', { text: 'Fotos reais (2026)' }), galeriaMiniaturas(),
+        el('section', { class: 'det-bloco' }, el('h3', { text: CONFIG.fotos2026.titulo }), galeriaMiniaturas(),
           el('p', { class: 'legenda-pequena', text: CONFIG.fotos2026.legenda })),
         el('button', { type: 'button', class: 'btn-txt', onclick: () => abrirTour(CONFIG, u) }, 'Mais fotos'),
         el('section', { class: 'det-bloco' }, el('h3', { text: 'Compartilhar' }),
           el('button', { type: 'button', class: 'btn-txt', id: 'btn-copiar', onclick: () => copiarLink(u) }, 'Copiar link desta unidade'),
           el('input', { class: 'link-txt mono', id: 'link-txt', readonly: true, value: linkUnidade(u), 'aria-label': 'Link desta unidade' })),
-        el('p', { class: 'legenda-pequena', text: `Fonte: tabela do CV de 05/10/2026${u.fonte?.includes('pagina') ? ', ' + u.fonte.split(', ')[1].replace('pagina', 'página') : ''}.` }))),
+        el('p', { class: 'legenda-pequena', text: `Fonte: ${CONFIG.fonteTabela}${u.fonte?.includes('pagina') ? ', ' + u.fonte.split(', ')[1].replace('pagina', 'página') : ''}.` }))),
   );
   corpo.scrollTop = 0; // 15/10 FILA D15: a new unit always opens at the top (the old scroll position was kept)
   // WhatsApp icon
@@ -426,7 +426,7 @@ async function carregaManifestoTour360() {
 // 360 v3 (B6): keep only complete points (a sky layer + at least one sun or night layer, an image per layer), drop
 // neighbour links to missing points and any light layer whose fixture is not confirmed (Victor 22:5x: no light
 // without the fixture seen in the clips). Returns the manifest OBJECT (base = folder of the manifest) or null.
-const LUZES_CONFIRMADAS = ['teto', 'abajur', 'cozinha'];
+// 15/10 FILA C8: the confirmed lamps are the manifest's cena.luzes (no list of the apartment in the code)
 // v4: fora (window mask, also used by the Google city), albedo/normal/solvis/solind (minute-by-minute sun) are data layers, not lights
 const CAMADAS_BASE = ['ceu', 'sol', 'noite', 'fora', 'albedo', 'normal', 'solvis', 'solind', 'vidro'];
 function limparManifesto360(man, url) {
@@ -434,7 +434,7 @@ function limparManifesto360(man, url) {
   const completo = (p) => p && p.id && p.camadas && p.camadas.ceu && p.camadas.ceu.arq;
   const pontos = man.pontos.filter(completo).map((p) => {
     const camadas = {};
-    for (const [k, v] of Object.entries(p.camadas)) if (CAMADAS_BASE.includes(k) || LUZES_CONFIRMADAS.includes(k)) camadas[k] = v;
+    for (const [k, v] of Object.entries(p.camadas)) if (CAMADAS_BASE.includes(k) || ((man.cena && man.cena.luzes) || []).includes(k)) camadas[k] = v;
     return { ...p, camadas };
   });
   const ids = new Set(pontos.map((p) => p.id));
@@ -542,12 +542,12 @@ function preencherBarraInterior(u) {
         el('li', {}, el('span', { text: 'Área privativa' }), el('span', { class: 'mono', text: m2(u.area_m2) })),
         el('li', {}, el('span', { text: 'Vaga' }), el('span', { class: 'mono', text: String(u.vaga ?? 1) })),
         temPreco ? el('li', {}, el('span', { text: 'R$ por m²' }), el('span', { class: 'mono', text: brl(u.preco_m2) })) : null)),
-    el('ul', { class: 'avisos' }, el('li', { text: 'Preço varia por andar e posição.' }), el('li', { text: 'Escritura e ITBI por conta do comprador.' })),
+    el('ul', { class: 'avisos' }, ...CONFIG.avisosCardCurto.map((t) => el('li', { text: t }))),
     el('section', { class: 'det-bloco' }, el('h3', { text: 'Planta' }),
-      planta ? el('div', { class: `planta-box ${planta.tipo}` }, el('img', { src: 'assets/planta/planta-final-6.webp', alt: 'Planta ilustrativa do studio', loading: 'lazy', width: 700, height: 900 }))
+      planta ? el('div', { class: `planta-box ${planta.tipo}` }, el('img', { src: CONFIG.planta.arquivo, alt: CONFIG.planta.alt, loading: 'lazy', width: CONFIG.planta.largura, height: CONFIG.planta.altura }))
         : el('div', { class: 'planta-falta' }, 'Planta deste final em breve'),
       el('p', { class: 'legenda-pequena', text: planta ? planta.texto + ' Ilustração artística.' : '' })),
-    el('section', { class: 'det-bloco' }, el('h3', { text: 'Fotos reais (2026)' }), galeriaMiniaturas(),
+    el('section', { class: 'det-bloco' }, el('h3', { text: CONFIG.fotos2026.titulo }), galeriaMiniaturas(),
       el('p', { class: 'legenda-pequena', text: CONFIG.fotos2026.legenda }))));
 }
 async function entrarApartamento(id, { semAnimacao = false } = {}) {
@@ -746,7 +746,7 @@ async function tierGpu() {
   try {
     const mod = await Promise.race([import('detect-gpu'), new Promise((_, rej) => setTimeout(() => rej(new Error('timeout import')), 2500))]);
     return await Promise.race([
-      mod.getGPUTier({ benchmarksURL: 'https://cdn.jsdelivr.net/npm/detect-gpu@5.0.70/dist/benchmarks' }),
+      mod.getGPUTier({ benchmarksURL: new URL('./vendor/detect-gpu@5.0.70/dist/benchmarks', import.meta.url).href }), // C5: local copy
       new Promise((res) => setTimeout(() => res({ tier: -1, type: 'TIMEOUT' }), 2500)),
     ]);
   } catch (e) { return { tier: -1, type: 'ERRO', erro: String(e.message || e) }; }
@@ -834,7 +834,7 @@ function ligar() {
   window.addEventListener('popstate', () => { if (interiorAberto) sairApartamento('voltar'); });
   const vizinho = (d) => {
     const u = porId.get(app.unidade); if (!u) return;
-    const f = ((u.final - 1 + d + 9) % 9) + 1;
+    const n = FINAIS.length, f = FINAIS[(FINAIS.indexOf(u.final) + d + n) % n];
     abrirUnidade(`${u.andar}-${f}`);
   };
   $('#card-ant').addEventListener('click', () => vizinho(-1));
@@ -848,7 +848,7 @@ function ligar() {
   });
 }
 function deepLink() {
-  const m = /^#u(\d{2,3})(-dentro)?$/.exec(location.hash || '');
+  const m = new RegExp(`^#u(${PREDIO_CFG.unidades.regexNumero})(-dentro)?$`).exec(location.hash || ''); // C1: unit number format from predio.json
   const u = m && porNumero.get(m[1]);
   if (!u) return false;
   fecharAbertura(); abrirUnidade(u.id);

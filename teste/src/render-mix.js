@@ -9,8 +9,8 @@ import * as THREE from 'three';
 import { solNoInstante } from './interior-sol.js';
 import { capacidade } from './capacidade.js';
 
-// only fixtures seen in the clips (dados/b6-inventario.json > luzes); the curtain LED was removed (not confirmed)
-export const LUZES = ['teto', 'abajur', 'cozinha'];
+// 15/10 FILA C8: the lamps (only fixtures seen in the clips), their order and the pouf tuning come from the tour manifest
+// ("cena" block), passed by tour360.js - nothing of the apartment is written here
 export const ROTULO = 'Imagem ilustrativa fiel ao apartamento — render a partir de fotos e medidas';
 const LUX_W = 683, EFICACIA_SOL = 105;
 
@@ -250,7 +250,8 @@ const PRETO = new THREE.DataTexture(new Uint8Array([0, 0, 0, 255]), 1, 1); PRETO
 
 // One panorama point: owns its layer textures and a render target with the mixed (linear, tone-mapped) result.
 export class MisturaPonto {
-  constructor(renderer, ponto, base, { larguraMax = 4096, SOL, unidade = null, finalRender = null } = {}) {
+  constructor(renderer, ponto, base, { larguraMax = 4096, SOL, unidade = null, finalRender = null, luzes = [], pufe = {} } = {}) {
+    this.luzesOrdem = luzes; // C8: manifest cena.luzes (order of the sum kept)
     this.r = renderer; this.p = ponto; this.base = base; this.max = larguraMax; this.SOL = SOL;
     this.unidade = unidade; this.finalRender = finalRender; // S2 (15/10): unit being shown + final of the rendered unit
     this.cache = new Map();
@@ -265,8 +266,8 @@ export class MisturaPonto {
       vertexShader: VERT, fragmentShader: FRAG, depthTest: false, depthWrite: false,
       uniforms: { t: { value: Array(7).fill(PRETO) }, g: { value: Array.from({ length: 7 }, () => new THREE.Vector3()) },
         esc: { value: Array(7).fill(1) }, gama: { value: 2.2 }, ombro: { value: +(new URLSearchParams(location.search).get('ombro')) || 1.1 }, joelho: { value: Array(7).fill(0) }, joelho2: { value: Array(7).fill(0.95) }, gamaL: { value: Array(7).fill(2.2) }, y2: { value: Array(7).fill(2) }, ymax: { value: Array(7).fill(4) }, wb: { value: new THREE.Vector3(1, 1, 1) }, expo: { value: 1 }, srgb: { value: half ? 0 : 1 },
-        tFora: { value: PRETO }, usaFora: { value: 0 }, pufeGanho: { value: +(new URLSearchParams(location.search).get('pufe')) || 8 }, pufeAmb: { value: Number.isFinite(parseFloat(new URLSearchParams(location.search).get('pufeA'))) ? parseFloat(new URLSearchParams(location.search).get('pufeA')) : 1.5 },
-        pufeAlb: { value: new THREE.Vector3(0.027, 0.031, 0.051) }, corLuz: { value: new THREE.Vector3(1, 1, 1) }, ambSala: { value: 0 }, pufeNoite: { value: 1 }, /* pufeAlb = sRGB (46, 50, 64) linear */ fatorFora: { value: 1 }, modoLum: { value: 0 }, tLoc: { value: PRETO }, sLoc: { value: 0 }, lG: { value: 0 }, dbR: { value: 14 / w }, loIdx: { value: Array(7).fill(-1) }, tL0: { value: PRETO }, tL1: { value: PRETO }, tL2: { value: PRETO }, dbT: { value: (new URLSearchParams(location.search).get('deband') === '0' ? 0 : 3) / 255 },
+        tFora: { value: PRETO }, usaFora: { value: 0 }, pufeGanho: { value: +(new URLSearchParams(location.search).get('pufe')) || pufe.ganho || 0 }, pufeAmb: { value: Number.isFinite(parseFloat(new URLSearchParams(location.search).get('pufeA'))) ? parseFloat(new URLSearchParams(location.search).get('pufeA')) : (pufe.amb ?? 0) },
+        pufeAlb: { value: new THREE.Vector3(...(pufe.albedo || [0, 0, 0])) }, corLuz: { value: new THREE.Vector3(1, 1, 1) }, ambSala: { value: 0 }, pufeNoite: { value: 1 }, /* pufeAlb = sRGB (46, 50, 64) linear */ fatorFora: { value: 1 }, modoLum: { value: 0 }, tLoc: { value: PRETO }, sLoc: { value: 0 }, lG: { value: 0 }, dbR: { value: 14 / w }, loIdx: { value: Array(7).fill(-1) }, tL0: { value: PRETO }, tL1: { value: PRETO }, tL2: { value: PRETO }, dbT: { value: (new URLSearchParams(location.search).get('deband') === '0' ? 0 : 3) / 255 },
         tAlb: { value: PRETO }, tNor: { value: PRETO }, tVis: { value: PRETO }, tVis2: { value: PRETO }, nInt: { value: 0 }, usaVis: { value: 0 }, gDir: { value: new THREE.Vector3() },
         solDir: { value: new THREE.Vector3(0, 0, 1) }, meioMin: { value: 0 }, visTam: { value: new THREE.Vector2(1, 1) }, raioVis: { value: Number.isFinite(parseFloat(new URLSearchParams(location.search).get('visr'))) ? parseFloat(new URLSearchParams(location.search).get('visr')) : (capacidade().nivel === 'topo' ? 2 : 1) }, pesoN: { value: new URLSearchParams(location.search).get('visn') === '0' ? 0 : 1 } }, // ?visr=0 = old look, ?visn=0 = no normal weight (tests)
     });
@@ -369,7 +370,7 @@ void main(){
       if (fa > 0) lista.push({ c: sol[nome(ant)], g: cs.map((x) => x * gs * fa) });
       if (fb > 0) lista.push({ c: sol[nome(pos)], g: cs.map((x) => x * gs * fb) });
     }
-    for (const k of LUZES) if (luzes && luzes[k] && C[k]) lista.push({ c: C[k], g: [1, 1, 1], luz: true });
+    for (const k of this.luzesOrdem) if (luzes && luzes[k] && C[k]) lista.push({ c: C[k], g: [1, 1, 1], luz: true });
     const media = [0, 0, 0];
     for (const it of lista) for (let i = 0; i < 3; i++) media[i] += it.g[i] * it.c.media[i];
     // v4: separate interior / exterior means (when every layer has them)
@@ -483,7 +484,7 @@ void main(){
     // enter as tiny numbers (abajur escala 0.004 x pow(v, 2.2) < 1e-4) that round in steps. The exposure is folded into
     // each layer's scale BEFORE the sum, so every term is near 1 in the shader (same image, no underflow).
     const K = U.expo.value;
-    { const c = m.map((x, i) => x * U.wb.value.getComponent(i)); U.ambSala.value = Math.max(lum(c) * K, ALVO * (1 - kDia)); /* 15/10 FILA D10: from the balcony the room is far and dim, the night gain hits its 4.5 cap and the pouf's ambient fell to ~1/3 of the other points (top face black, lit front band): at night it never goes below the uncapped value (= ALVO) */ const NN = +(new URLSearchParams(location.search).get('pufeN')) || 1.6; U.pufeNoite.value = NN + (1 - NN) * kDia; } // R4: mean room luminance after exposure; night lift x2.2 (amber lamps on navy = black)
+    { const c = m.map((x, i) => x * U.wb.value.getComponent(i)); U.ambSala.value = Math.max(lum(c) * K, ALVO * (1 - kDia)); /* 15/10 FILA D10: from the balcony the room is far and dim, the night gain hits its 4.5 cap and the pouf's ambient fell to ~1/3 of the other points (top face black, lit front band): at night it never goes below the uncapped value (= ALVO) */ const NN = +(new URLSearchParams(location.search).get('pufeN')) || this.pufeNoiteCena || 1; U.pufeNoite.value = NN + (1 - NN) * kDia; } // R4: mean room luminance after exposure; night lift x2.2 (amber lamps on navy = black)
     for (let i = 0; i < 7; i++) U.esc.value[i] *= K;
     U.gDir.value.multiplyScalar(K); U.expo.value = 1;
     // local adaptation: day strength 0.5, night 0.2 (keeps the mood of the lamps); ?sloc= tests, ?sloc=0 = off

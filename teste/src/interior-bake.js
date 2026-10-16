@@ -11,7 +11,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 
 const URL_BAKE = new URL('../assets/interior/b6/interior_b6.glb.json', import.meta.url).href;
-const DRACO = 'https://cdn.jsdelivr.net/npm/three@0.186.1/examples/jsm/libs/draco/gltf/';
+const DRACO = new URL('./vendor/three@0.186.1/examples/jsm/libs/draco/gltf/', import.meta.url).href; // C5: local copy
 let cache = null;
 
 async function baixar() {
