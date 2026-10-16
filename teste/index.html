@@ -145,7 +145,7 @@ h1, h2, h3 { margin: 0; text-wrap: balance; }
 .ab-data { margin: 0; font-size: 12px; color: var(--texto-2); }
 @media (max-width: 999px) {
   .abertura { display: block; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
-  .ab-palco { height: max(320px, 53svh); }
+  .ab-palco { height: max(320px, 60svh); } /* the building keeps ~88% of its ae1eb00 size (photo ~ 2/3 of the screen then); the card scrolls below it */
   .ab-texto { padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 18px); margin: 0 auto; }
   .ab-nome { font-size: clamp(46px, 13vw, 96px); }
   .ab-acoes { position: sticky; bottom: 0; z-index: 3; margin: 0 -22px; padding: 12px 22px calc(env(safe-area-inset-bottom, 0px) + 10px); background: linear-gradient(0deg, var(--base) 72%, rgba(20,18,16,0)); }
