@@ -12,7 +12,9 @@
     "tipologia": "studio mobiliado",
     "tipologiaPlural": "studios",
     "estadoImovel": "Imóvel pronto, mobiliado e em operação de locação (nota d da tabela)",
-    "selo": "demonstração"
+    "selo": "demonstração",
+    "bairroCidade": "Itaim Bibi · São Paulo",
+    "enderecoRua": "R. João Cachoeira, 1577"
   },
   "marca": {
     "imobiliaria": "Geracional",
@@ -22,6 +24,9 @@
     "whatsapp": "5511989325189",
     "faltaWhatsapp": "[falta: número do WhatsApp do Hugo]",
     "mensagemWhatsapp": "Olá, tenho interesse na unidade {numero} do Upper Itaim (tabela de outubro/2026)",
+    "mensagemReserva": "Olá, quero reservar a unidade {numero} do Upper Itaim (tabela de outubro/2026)",
+    "mensagemPredio": "Olá, tenho interesse no Upper Itaim (tabela de outubro/2026)",
+    "corretorCurto": "Hugo",
     "logo": "assets/marca/geracional.svg",
     "logoAlt": "Geracional Negócios Imobiliários",
     "logoLargura": 107,
@@ -124,5 +129,24 @@
   "materiaisEnchimento": {"branco": "#cdc5b8", "pedra": "#b9b2a6"},
   "rua": {"_leia": "rua de reserva (so aparece sem a cidade B7/Google): lado -x da torre", "distancia": 7, "largura": 9, "calcada": 2.5, "comprimento": 300},
   "entorno": {"atribuicao": "Entorno: imagens de drone do prédio (abr/2026); mapa 3D LiDAR 2017 e ortofoto 2020 da Prefeitura de São Paulo — GeoSampa (CC BY-SA 4.0).", "nota": "vista reconstruída a partir de imagens de drone (abril/2026) e do mapa 3D da Prefeitura", "extensaoFachadas_m": 2048, "extensaoRuas_m": 409.6},
+  "cartao": {
+    "_leia": "Card do Hugo (docs/card-hugo/CARD-ESPEC.md, 16/10/2026). Tudo que e null fica ESCONDIDO para o cliente (em ?revisao=1 aparece como [falta]); nunca inventar valor. destaque null = regra 'menor R$/m2 disponivel' (src/metricas.js). locacao/mercado/juridico/docs: formatos no anexo T3 da espec; preencher so com documento do corretor (locacao, juridico, docs) ou com a ferramenta da fonte publica (entorno: src/ferramentas/gera_entorno_tempos.py; mercado: gera_mercado_itbi.py). docs: so arquivo com autorizacao escrita para publicar; NUNCA o PDF do CV (rodape com e-mail pessoal do corretor, DV11).",
+    "destaque": null,
+    "ficha": {
+      "entrega": null,
+      "incorporadora": null,
+      "arquitetura": null,
+      "operador": null,
+      "modalidade": null,
+      "situacao": "Pronto, mobiliado e em operação de locação",
+      "areasComuns": ["Mercadinho na garagem", "Espaço gourmet"],
+      "areasComunsNota": "Vistos em vídeo do prédio (2026). Lista completa a confirmar com o corretor."
+    },
+    "entornoTempos": {"fonte": "Tempo a pé pela rede de ruas do OpenStreetMap (ODbL), a 4,8 km/h, do centro do lote até o ponto mais próximo da avenida e da borda do parque; calculado em 16/10/2026.", "fariaLima": {"rotulo": "Av. Faria Lima", "min": 8, "m": 631, "modo": "pe"}, "ibirapuera": {"rotulo": "Parque Ibirapuera", "min": 16, "m": 1254, "modo": "pe"}},
+    "locacao": null,
+    "mercado": null,
+    "juridico": null,
+    "docs": null
+  },
   "plantaStudio": {"_leia": "medidas da planta do final 6 (114 px/m) e da foto do apto 31; ver src/interior-sol.js", "W": 5.4, "VG": 6.14, "VI": 6.05, "VO": 6.23, "BAL": 1.22, "G0": 0.81, "G1": 4.55, "HG": 2.25, "HT": 2.6, "HCB": 2.32, "HB": 2.19, "VIGA": 0.22, "HC": 0.106, "B0": -0.1, "B1": 5.5, "PISO_A_PISO": 2.81, "LAJE_1": 11.92}
 }

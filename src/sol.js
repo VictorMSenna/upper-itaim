@@ -241,13 +241,16 @@ export function secaoSolUnidade(rel, CFG, u) {
   const mk = (tag, attrs) => { const n = document.createElementNS(ns, tag); Object.entries(attrs).forEach(([k, v]) => n.setAttribute(k, v)); svg.append(n); return n; };
   const vp = fin.abertura?.varanda_prof_m ?? 1.22;
   const lado = fin.sacada_lado; // N: z=0 side · S: z=D · W: x=0 (street) · E: x=W
+  // Card do Hugo T2: finais without a balcony (Upper 8 and 9, estimate B5) say "janela", never "sacada"
+  const semSacada = fin.abertura?.varanda_prof_m === 0;
+  const onde = semSacada ? 'janela' : 'sacada';
   const varanda = lado === 'N' ? [0, 0, W, vp] : lado === 'S' ? [0, D - vp, W, vp] : lado === 'W' ? [0, 0, vp, D] : [W - vp, 0, vp, D];
   mk('rect', { x: 0, y: 0, width: W, height: D, class: 'sp-piso' });
   mk('rect', { x: varanda[0], y: varanda[1], width: varanda[2], height: varanda[3], class: 'sp-varanda' });
   const mancha = mk('polygon', { class: 'sp-sol', points: '' });
   mk('rect', { x: 0, y: 0, width: W, height: D, class: 'sp-borda' });
   const tv = mk('text', { x: varanda[0] + varanda[2] / 2, y: varanda[1] + varanda[3] / 2, class: 'sp-txt', 'text-anchor': 'middle', 'dominant-baseline': 'middle' });
-  tv.textContent = 'sacada';
+  tv.textContent = onde;
   if (lado === 'W' || lado === 'E') tv.setAttribute('transform', `rotate(-90 ${varanda[0] + varanda[2] / 2} ${varanda[1] + varanda[3] / 2})`);
 
   // mini arc: sun elevation over the day, shaded where the balcony gets direct sun (with neighbours)
@@ -288,9 +291,9 @@ export function secaoSolUnidade(rel, CFG, u) {
     const d = dadosU.est[i.est];
     const ints = d.intervalos.map(([a, b]) => `${fmtH(hm(a))}–${fmtH(hm(b))}`);
     resumo.textContent = ints.length
-      ? `Sol na sacada: ${ints.join(' e ')} (~${durTxt(d.horas)}) · ${NOME_EST[i.est]}, ${dataBR(e.data)}`
-      : `Sem sol direto na sacada em ${dataBR(e.data)} (${NOME_EST[i.est].toLowerCase()}), pela simulação.`;
-    legenda.textContent = `Sacada voltada para ${PREDIO_CFG.faces[lado]?.texto || lado /* 15/10 FILA D18b: cardinal direction, not "fileira"; C4: text from predio.json faces */}. Planta esquemática do final ${u.final}; mancha = sol direto no piso. ${S.meta.aviso}`;
+      ? `Sol direto na ${onde}: ${ints.join(' e ')} (~${durTxt(d.horas)}) · ${NOME_EST[i.est]}, ${dataBR(e.data)}`
+      : `Sem sol direto na ${onde} em ${dataBR(e.data)} (${NOME_EST[i.est].toLowerCase()}), pela simulação.`;
+    legenda.textContent = `${semSacada ? 'Janela' : 'Sacada'} voltada para ${PREDIO_CFG.faces[lado]?.texto || lado /* 15/10 FILA D18b: cardinal direction, not "fileira"; C4: text from predio.json faces */}. Planta esquemática do final ${u.final}; mancha = sol direto no piso. ${S.meta.aviso}`;
     estDesenhada = i.est;
     return { X, Y };
   };
@@ -301,11 +304,11 @@ export function secaoSolUnidade(rel, CFG, u) {
     const cv = dadosU.est[i.est].cv;
     const k = i.idx;
     const temSol = i.dia && k >= 0 && k < cv.length && cv[k] === '1';
-    agora.textContent = temSol ? 'sol na sacada agora' : 'sem sol direto agora';
+    agora.textContent = temSol ? `sol na ${onde} agora` : 'sem sol direto agora';
     agora.classList.toggle('sim', temSol);
     const poli = i.dia && k >= 0 ? (fin.mancha[i.est] || [])[Math.min(k, (fin.mancha[i.est] || []).length - 1)] : null;
     mancha.setAttribute('points', temSol && poli ? poli.map(([x, z]) => `${x},${z}`).join(' ') : '');
-    if (temSol && !poli) agora.textContent = 'sol na sacada agora (não chega ao piso da sala)';
+    if (temSol && !poli) agora.textContent = `sol na ${onde} agora (não chega ao piso da sala)`;
     if (i.dia) { ponto.setAttribute('cx', escala.X(i.t).toFixed(1)); ponto.setAttribute('cy', escala.Y(i.el).toFixed(1)); } else { ponto.setAttribute('cx', -10); }
     void e;
   });
@@ -317,13 +320,18 @@ export function secaoSolUnidade(rel, CFG, u) {
   return sec;
 }
 
-// One line for the unit card: "Sol da manhã · ~1h10 no inverno" (data computed WITH neighbours, sol.json)
+// Unit-card sun chip (Card do Hugo, spec T2, 16/10): "Sol da manhã · ~3h35/dia na primavera" / "Sem sol direto na
+// primavera"; duration rounded to 5 min; data computed WITH the neighbours (sol.json). Guard: only the LiDAR-based data
+// (S1 audit 15/10) - with older data the chip is not shown at all (better nothing than the wrong sun).
 const PERIODO = { manha: 'Sol da manhã', tarde: 'Sol da tarde', 'manha e tarde': 'Sol de manhã e à tarde' };
 const NA_EST = { outono: 'no outono', inverno: 'no inverno', primavera: 'na primavera', verao: 'no verão' };
+const dur5 = (h) => { const mm = Math.round((h * 60) / 5) * 5; return `${Math.floor(mm / 60)}h${String(mm % 60).padStart(2, '0')}`; };
+export const solConfiavel = (SOL) => /LiDAR/i.test(SOL?.meta?.versao || '');
 export function resumoSolUnidade(SOL, u, est) {
+  if (!solConfiavel(SOL)) return null;
   const d = SOL.unidades[u.numero]?.est?.[est];
   if (!d) return null;
-  if (!d.horas || d.horas < 0.1) return `Sem sol direto na sacada ${NA_EST[est]}`;
-  const p = PERIODO[d.periodo] || 'Sol na sacada';
-  return `${p} · ~${durTxt(d.horas)} ${NA_EST[est]}`;
+  if (d.periodo === 'sem sol direto' || !d.horas || d.horas < 0.25) return `Sem sol direto ${NA_EST[est]}`;
+  const p = PERIODO[d.periodo] || 'Sol direto';
+  return `${p} · ~${dur5(d.horas)}/dia ${NA_EST[est]}`;
 }

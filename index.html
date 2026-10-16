@@ -108,6 +108,48 @@ h1, h2, h3 { margin: 0; text-wrap: balance; }
 .ab-fatos { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 0 0 4px; font-size: 13px; color: var(--texto-2); }
 .ab-fatos b { color: var(--texto); font-family: var(--f-mono); font-weight: 600; }
 .ab-texto .btn-pri { justify-self: stretch; }
+/* Card do Hugo (16/10, DV1/DV2): building card blocks */
+.ab-end { margin: 8px 0 0; font-size: 14px; color: var(--texto-2); } /* below the descenders of the name (Cormorant line-height .86) */
+.ab-bloco { border: 1px solid var(--linha); border-radius: 16px; background: rgba(255,255,255,.03); }
+.ab-disp-bloco { padding: 12px 14px; display: grid; gap: 8px; }
+.ab-disp-l { margin: 0; display: flex; justify-content: space-between; align-items: baseline; gap: 10px; font-size: 15px; }
+.ab-disp-l b { font-family: var(--f-mono); font-weight: 700; }
+.ab-disp-l span + span { font-size: 13px; color: var(--texto-2); }
+.ab-barra { display: flex; gap: 2px; height: 8px; border-radius: 8px; overflow: hidden; background: rgba(255,255,255,.06); }
+.ab-b { display: block; height: 100%; }
+.ab-b.disponivel { background: var(--disp); }
+.ab-b.reservada { background: repeating-linear-gradient(135deg, var(--res) 0 3px, #8a5a00 3px 5px); }
+.ab-b.indisponivel { background: #4a4741; }
+.ab-leg { margin: 0; display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: var(--texto-2); }
+.ab-leg span { display: inline-flex; align-items: center; gap: 6px; }
+.ab-leg .dot.indisponivel { background: #4a4741; border-color: #4a4741; }
+.ab-total { margin: 0; font-size: 12px; color: var(--texto-2); }
+.ab-numeros { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); overflow: hidden; }
+.ab-numeros > div { padding: 10px 14px; display: grid; gap: 2px; border-top: 1px solid var(--linha); min-width: 0; }
+.ab-numeros > div:nth-child(-n+2) { border-top: 0; }
+.ab-numeros > div:nth-child(2) { border-left: 1px solid var(--linha); }
+.ab-numeros small { font-size: 12px; color: var(--texto-2); }
+.ab-numeros b { font-size: 19px; font-weight: 650; letter-spacing: -.01em; }
+.ab-numeros .ab-num-largo { grid-column: 1 / -1; }
+.ab-numeros .ab-num-largo b { font-size: 15px; font-weight: 600; }
+.ab-destaque { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; text-align: left; border: 0; border-radius: 16px; padding: 12px 16px; background: var(--amaranto); color: #fff; }
+.ab-destaque:hover { filter: brightness(1.08); }
+.ab-destaque small { display: block; font: 600 10.5px var(--f-mono); letter-spacing: .12em; text-transform: uppercase; opacity: .82; }
+.ab-destaque b { display: block; font-size: 16.5px; margin: 3px 0 2px; }
+.ab-destaque .mono { font-size: 13px; opacity: .88; }
+.ab-acoes { display: grid; }
+.ab-wa { width: 100%; }
+.ab-wa b { font-weight: 700; }
+.ab-det { display: flex; justify-content: space-between; align-items: center; border: 0; border-top: 1px solid var(--linha); background: none; padding: 13px 2px 4px; font: 600 15px var(--f-body); color: var(--texto); }
+.ab-det::after { content: "+"; font: 600 19px var(--f-mono); color: var(--texto-2); }
+.ab-data { margin: 0; font-size: 12px; color: var(--texto-2); }
+@media (max-width: 999px) {
+  .abertura { display: block; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
+  .ab-palco { height: max(320px, 60svh); } /* the building keeps ~88% of its ae1eb00 size (photo ~ 2/3 of the screen then); the card scrolls below it */
+  .ab-texto { padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 18px); margin: 0 auto; }
+  .ab-nome { font-size: clamp(46px, 13vw, 96px); }
+  .ab-acoes { position: sticky; bottom: 0; z-index: 3; margin: 0 -22px; padding: 12px 22px calc(env(safe-area-inset-bottom, 0px) + 10px); background: linear-gradient(0deg, var(--base) 72%, rgba(20,18,16,0)); }
+}
 .ab-texto > * { animation: sobe .7s cubic-bezier(.2,.7,.2,1) both; }
 .ab-texto > *:nth-child(2) { animation-delay: .08s; } .ab-texto > *:nth-child(3) { animation-delay: .16s; } .ab-texto > *:nth-child(4) { animation-delay: .24s; } .ab-texto > *:nth-child(5) { animation-delay: .32s; }
 @keyframes sobe { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
@@ -119,9 +161,9 @@ h1, h2, h3 { margin: 0; text-wrap: balance; }
   .abertura { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 46%); }
   .ab-palco { grid-column: 2; grid-row: 1; margin: 20px 20px calc(var(--legal-h) + 20px) 0; border-radius: 26px; }
   .ab-veu { display: none; }
-  .ab-texto { grid-column: 1; grid-row: 1; align-self: center; padding: 0 56px var(--legal-h) 72px; max-width: 720px; gap: 14px; }
-  .ab-texto .btn-pri { justify-self: start; min-width: 220px; }
-  .ab-nome { font-size: clamp(92px, 9vw, 150px); }
+  .ab-texto { grid-column: 1; grid-row: 1; align-self: stretch; align-content: safe center; overflow-y: auto; padding: 28px 56px 28px 72px; max-width: 640px; gap: 12px; }
+  .ab-texto .btn-pri { justify-self: stretch; min-width: 220px; }
+  .ab-nome { font-size: clamp(64px, 6.2vw, 108px); }
   .ab-linha { font-size: 20px; }
   .ab-fatos { font-size: 14px; }
   .ab-topo { left: 72px; right: auto; }
@@ -367,6 +409,91 @@ body.painel-aberto .chip-lista, body.vista-foto .chip-lista { display: none; }
 .sol-agora { font-weight: 700; color: var(--texto-2); font-size: 13px; } .sol-agora.sim { color: #f4c45a; }
 .sol-resumo { margin: 0; font-weight: 600; font-size: 13.5px; }
 
+/* Card do Hugo (16/10): unit card first screen (spec C) */
+.cd-m2 { margin: 8px 0 0; font-size: 14px; color: var(--texto-2); }
+.cd-m2 .mono { color: var(--texto); font-weight: 600; }
+.cd-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0 0; }
+.chip { display: inline-flex; align-items: center; gap: 7px; padding: 6px 12px; border-radius: 999px; background: rgba(255,255,255,.08); font-size: 13px; color: var(--texto); }
+.chip-sol { color: #f4d48a; }
+.chip-sol .sol-ico { width: 10px; height: 10px; box-shadow: 0 0 0 2px rgba(244,196,90,.25); }
+.chip-sol.sem { color: var(--texto-2); }
+.chip-sol.sem .sol-ico { background: transparent; border: 1.5px solid var(--texto-2); box-shadow: none; }
+.cd-pag { margin: 14px 0 0; border: 1px solid var(--linha); border-radius: 14px; overflow: hidden; }
+.cd-pag h3 { font: 600 12.5px var(--f-body); color: var(--texto-2); padding: 10px 14px; border-bottom: 1px solid var(--linha); }
+.cd-pag-l { display: flex; justify-content: space-between; gap: 10px; padding: 10px 14px; font-size: 14px; }
+.cd-pag-l + .cd-pag-l { border-top: 1px solid var(--linha); }
+.cd-pag-l b { font-weight: 600; }
+.cd-loc-g { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; margin-top: 12px; }
+.cd-loc-c { padding: 10px 12px; border-radius: 12px; background: rgba(255,255,255,.05); display: grid; gap: 2px; }
+.cd-loc-c small { font-size: 12px; color: var(--texto-2); }
+.cd-loc-c b { font-size: 16px; font-weight: 600; }
+.cd-loc-nota, .cd-tabela { font-size: 11.5px; color: var(--texto-2); margin: 8px 0 0; }
+.cd-loc-falta { font-size: 12px; margin: 10px 0 0; }
+.cd-simular { width: 100%; margin-top: 10px; border: 1px solid var(--tijolo); background: rgba(239,91,46,.08); border-radius: 14px; padding: 12px 14px; text-align: left; font-weight: 600; color: var(--texto); }
+.cd-sim { margin-top: 8px; }
+.cd-sim h3 { font: 600 12.5px var(--f-body); color: var(--texto-2); margin-bottom: 6px; }
+.cd-sim-l { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.cd-sim-b { border: 1px solid var(--linha); background: rgba(255,255,255,.04); border-radius: 12px; padding: 8px 10px; text-align: left; display: grid; gap: 2px; color: var(--texto); }
+.cd-sim-b:hover { background: rgba(255,255,255,.09); }
+.cd-sim-b b { font-size: 13.5px; font-weight: 600; }
+.cd-sim-b > .mono { font-size: 12px; color: var(--texto-2); }
+.u-resumo .u-tabela { flex-basis: 100%; font-size: 11.5px; }
+
+/* Card do Hugo (16/10): "Ver detalhes do prédio" sheet + rentability simulator (src/predio-detalhes.js) */
+.pdet { position: fixed; inset: 0; z-index: 88; background: rgba(0,0,0,.55); display: flex; justify-content: center; align-items: stretch; animation: int-entra .22s ease-out; }
+.pd-caixa { width: 100%; max-width: 560px; background: var(--base); display: flex; flex-direction: column; min-height: 0; padding: calc(env(safe-area-inset-top, 0px) + 12px) 18px calc(env(safe-area-inset-bottom, 0px) + 12px); }
+@media (min-width: 1000px) { .pdet { align-items: center; } .pd-caixa { height: min(880px, calc(100% - 40px)); border-radius: 22px; border: 1px solid var(--linha); box-shadow: var(--sombra); padding: 18px 24px; } }
+.pd-topo { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 12px; flex: none; }
+.pd-voltar { border: 0; background: none; color: var(--texto); font: 600 14px var(--f-body); padding: 6px 0; flex: none; }
+.pd-data { font-size: 11.5px; color: var(--texto-2); text-align: right; }
+.pd-caixa > .ab-lugar { flex: none; }
+.pd-nome { font: 800 40px/1 var(--f-display); letter-spacing: -.02em; margin: 4px 0 12px; flex: none; }
+.pd-nome span { color: var(--tijolo-2); }
+.pd-abas { display: flex; gap: 2px; padding: 4px; border-radius: 14px; border: 1px solid var(--linha); background: rgba(255,255,255,.03); margin-bottom: 12px; overflow-x: auto; flex: none; }
+.pd-abas button { flex: 1; border: 0; background: none; padding: 9px 10px; border-radius: 10px; font-weight: 600; font-size: 13.5px; color: var(--texto-2); white-space: nowrap; }
+.pd-abas button[aria-selected="true"] { background: var(--texto); color: var(--base); }
+.pd-corpo { flex: 1 1 auto; min-height: 0; overflow: auto; overscroll-behavior: contain; display: grid; align-content: start; gap: 10px; padding-bottom: 12px; }
+.pd-h { font: 600 12.5px var(--f-body); color: var(--texto-2); margin: 6px 0 0; }
+.pd-tab { border: 1px solid var(--linha); border-radius: 14px; overflow: hidden; }
+.pd-tab > * + * { border-top: 1px solid var(--linha); }
+.pd-l { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding: 11px 14px; font-size: 14px; }
+.pd-l > span { color: var(--texto-2); }
+.pd-l b { font-weight: 600; text-align: right; }
+.pd-l3 { display: grid; grid-template-columns: 1fr auto auto; }
+.pd-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.pd-nota { margin: 0; font-size: 12px; color: var(--texto-2); }
+.pd-cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.pd-cards.g2 { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.pd-card { padding: 10px 12px; border-radius: 12px; background: rgba(255,255,255,.05); display: grid; gap: 2px; }
+.pd-card b { font-size: 18px; font-weight: 650; }
+.pd-card small { font-size: 12px; color: var(--texto-2); }
+.pd-barras-box { border: 1px solid var(--linha); border-radius: 14px; padding: 10px 14px; }
+.pd-barras { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 4px; height: 110px; margin-top: 8px; }
+.pd-bar { display: flex; flex-direction: column; justify-content: flex-end; align-items: stretch; gap: 3px; }
+.pd-bar i { display: block; background: var(--tijolo); border-radius: 3px 3px 0 0; }
+.pd-bar small { font-size: 10px; color: var(--texto-2); text-align: center; }
+.pd-cmp .pd-l { padding-bottom: 6px; }
+.pd-trilho { height: 6px; margin: 0 14px 10px; border-radius: 6px; background: rgba(255,255,255,.08); }
+.pd-trilho i { display: block; height: 100%; border-radius: 6px; background: var(--texto-2); }
+.pd-trilho i.q { background: var(--tijolo); }
+.pd-cmp + .pd-cmp { border-top: 0; }
+.pd-jur { display: flex; gap: 12px; padding: 11px 14px; }
+.pd-ok { width: 22px; height: 22px; border-radius: 50%; background: rgba(0,158,115,.25); flex: none; position: relative; }
+.pd-ok::after { content: ""; position: absolute; left: 7px; top: 4px; width: 6px; height: 11px; border: solid var(--disp-txt); border-width: 0 2px 2px 0; transform: rotate(45deg); }
+.pd-jur b { display: block; font-size: 14px; }
+.pd-jur small { font-size: 12px; color: var(--texto-2); }
+.pd-resp { padding: 12px 14px; border-radius: 14px; background: rgba(255,255,255,.05); }
+.pd-resp p { margin: 4px 0 0; font-size: 12.5px; color: var(--texto-2); }
+.pd-doc { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 11px 14px; text-decoration: none; }
+.pd-doc b { display: block; font-size: 14px; }
+.pd-doc small { font-size: 12px; color: var(--texto-2); }
+.pd-avisos { margin: 0; padding-left: 16px; font-size: 12px; color: var(--texto-2); }
+.pd-acoes { display: grid; gap: 8px; padding-top: 10px; border-top: 1px solid var(--linha); flex: none; }
+.pd-acoes > * { width: 100%; }
+.pd-form { display: grid; gap: 8px; }
+.pd-form label { display: grid; grid-template-columns: minmax(0, 1fr) 128px; align-items: center; gap: 10px; font-size: 13px; color: var(--texto-2); }
+.pd-form input { padding: 8px 10px; border-radius: 9px; border: 1px solid var(--linha-2); background: var(--base-2); color: var(--texto); text-align: right; font-variant-numeric: tabular-nums; min-width: 0; }
+
 /* info sheet */
 .legal-fundo { position: fixed; inset: 0; z-index: 80; background: rgba(0,0,0,.45); display: flex; align-items: flex-end; justify-content: center; }
 .legal { width: 100%; max-width: 640px; max-height: 85%; overflow: auto; border-radius: 24px 24px 0 0; padding: 18px 18px calc(22px + env(safe-area-inset-bottom, 0px)); }
@@ -610,13 +737,33 @@ body.revisao .aviso-revisao { display: block !important; }
     <div class="ab-veu" aria-hidden="true"></div>
     <div class="ab-topo"><span><img class="ab-logo" src="assets/marca/geracional.svg" alt="Geracional Negócios Imobiliários" width="107" height="34"><span class="seg" data-seg="creciJ"> · CRECI-J <span data-cfg="creciJ"></span></span></span><span class="selo-teste">demonstração</span></div>
   </div>
+  <!-- Card do Hugo (16/10, DV1/DV2, docs/card-hugo/CARD-ESPEC.md A): the opening is the building card; numbers filled by app.js preencherCardPredio -->
   <div class="ab-texto">
-    <p class="ab-lugar">R. João Cachoeira, 1577 · Itaim Bibi</p>
+    <p class="ab-lugar">Itaim Bibi · São Paulo</p>
     <h1 class="ab-nome" id="ab-nome"></h1>
+    <p class="ab-end"><span>R. João Cachoeira, 1577</span><span id="ab-metro" hidden></span></p>
     <p class="ab-linha">Studios prontos e mobiliados, já em operação de locação.</p>
-    <p class="ab-fatos"><span><b id="ab-disp">—</b> disponíveis</span><span>a partir de <b id="ab-preco">—</b></span><span><b id="ab-area">—</b></span></p>
-    <button type="button" class="btn-pri" id="btn-ver">Ver unidades
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
+    <div class="ab-bloco ab-disp-bloco">
+      <p class="ab-disp-l"><span><b id="ab-disp">—</b> disponíveis</span><span><b id="ab-res">—</b> reservadas</span></p>
+      <div class="ab-barra" id="ab-barra" role="img"></div>
+      <p class="ab-leg"><span><i class="dot disponivel" aria-hidden="true"></i>Disponível</span><span><i class="dot reservada" aria-hidden="true"></i>Reservada</span><span><i class="dot indisponivel" aria-hidden="true"></i>Indisponível</span></p>
+      <p class="ab-total" id="ab-total"></p>
+    </div>
+    <div class="ab-bloco ab-numeros">
+      <div><small>A partir de</small><b class="mono" id="ab-preco">—</b></div>
+      <div><small>R$/m² médio da tabela</small><b class="mono" id="ab-m2">—</b></div>
+      <div class="ab-num-largo"><small>Tipologia</small><b id="ab-area">—</b></div>
+      <div class="ab-num-largo" id="ab-modal" hidden><small>Modalidade</small><b id="ab-modal-v"></b></div>
+    </div>
+    <button type="button" class="ab-destaque" id="ab-destaque" hidden>
+      <span><small id="ab-dest-rot"></small><b id="ab-dest-t"></b><span class="mono" id="ab-dest-p"></span></span>
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg></button>
+    <div class="ab-acoes">
+      <button type="button" class="btn-pri" id="btn-ver">Ver unidades disponíveis</button>
+    </div>
+    <a class="btn-sec ab-wa" id="ab-wa" target="_blank" rel="noopener"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4.5 19.5 6 15.6A8 8 0 1 1 9 18.6Z"/></svg><span>Falar com <b id="ab-wa-nome"></b></span></a>
+    <button type="button" class="ab-det" id="btn-predio-det" aria-haspopup="dialog">Ver detalhes do prédio</button>
+    <p class="ab-data" id="ab-data"></p>
   </div>
 </section>
 

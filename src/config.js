@@ -16,6 +16,14 @@ export const CONFIG = {
   // WhatsApp that receives the leads (decision D7: the broker's). Digits only, with country code.
   whatsapp: mc.whatsapp,
   mensagemWhatsapp: (numero) => mc.mensagemWhatsapp.replaceAll('{numero}', numero),
+  // Card do Hugo (16/10, spec T5): message by kind - unit (above), reservation ("Reservar com"), building (no unit)
+  mensagemReserva: (numero) => (mc.mensagemReserva || mc.mensagemWhatsapp).replaceAll('{numero}', numero),
+  mensagemPredio: mc.mensagemPredio || '',
+  corretorCurto: mc.corretorCurto || mc.corretor,
+  bairroCidade: id.bairroCidade || '',
+  enderecoRua: id.enderecoRua || '',
+  // building card, tabs, rental, market, legal, docs: every null field stays hidden for the client (predio.json "cartao")
+  cartao: P.cartao || {},
   faltaWhatsapp: mc.faltaWhatsapp,
 
   imobiliaria: mc.imobiliaria,

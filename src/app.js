@@ -9,6 +9,7 @@ import { META, UNIDADES, PREDIO } from './dados.js';
 import { brl, brlCurto, m2, dataBR, STATUS, POSICAO, PLANTA, el, texto } from './util.js';
 import { PREDIO_CFG } from './predio.js';
 import { abrirTour } from './tour.js';
+import * as MET from './metricas.js'; // Card do Hugo (16/10): numbers of the building and unit cards (pure, tested in node)
 
 const params = new URLSearchParams(location.search);
 const TESTE = params.has('teste');
@@ -23,6 +24,17 @@ const N = PREDIO.andares_venda;
 // 15/10 FILA C4: the finals come from the units table (Upper: 1..9), never a fixed 9
 const FINAIS = [...new Set(UNIDADES.map((u) => u.final))].sort((a, b) => a - b);
 const falta = (v) => typeof v === 'string' && v.includes('[falta');
+// Card do Hugo: table numbers computed once (spec T1/T6)
+const MEDIA = MET.mediaTabela(UNIDADES);
+const CONT = MET.contagem(UNIDADES);
+const CART = CONFIG.cartao || {};
+const precoCheio = (v) => brl(v).replace(/,00$/, '');                 // "R$ 1.120.000"
+const precoMi = (v) => 'R$ ' + (v / 1e6).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 3 }) + ' mi'; // "R$ 1,12 mi"
+const m2Curto = (v) => brlCurto(v) + '/m²';                            // "R$ 27.979/m²"
+const pctBR = (v) => v.toLocaleString('pt-BR', { maximumFractionDigits: 1 });
+const capitaliza = (t) => (t ? t[0].toUpperCase() + t.slice(1) : t);
+// "Tabela de outubro/2026 · atualizada em 05/10/2026" (date = the CV PDF, dados.js META.gerada_em; spec 2.4)
+const TABELA_LINHA = `${CONFIG.tabela} · atualizada em ${dataBR(META.gerada_em)}`;
 
 const app = {
   cena: null, modo3d: 'carregando', motivoSem3d: null, vista: '3d', temFoto: false,
@@ -50,11 +62,44 @@ function preencherTextos() {
   const partes = CONFIG.nome.split(' ');
   $('#ab-nome').replaceChildren(partes.slice(0, -1).join(' ') + (partes.length > 1 ? ' ' : ''), el('span', { text: partes.at(-1) }));
   $('#u-total').textContent = `${UNIDADES.length} ${CONFIG.tipologiaPlural}`; // C1: was a fixed "117 studios" in index.html
-  $('#ab-disp').textContent = META.contagem.disponivel;
-  const precos = UNIDADES.filter((u) => u.preco_total).map((u) => u.preco_total);
-  $('#ab-preco').textContent = 'R$ ' + (Math.min(...precos) / 1e6).toLocaleString('pt-BR', { maximumFractionDigits: 2 }) + ' mi';
-  const areas = [...new Set(UNIDADES.map((u) => u.area_m2))].sort();
-  $('#ab-area').textContent = `${Math.round(areas[0])}–${Math.round(areas.at(-1))} m²`;
+  preencherCardPredio();
+}
+// Card do Hugo (DV1/DV2, spec A): the opening is the building card - drone photo of the front (F17) + table numbers
+function preencherCardPredio() {
+  const t = CART.entornoTempos;
+  const metro = t && t.metro;
+  const em = $('#ab-metro');
+  if (metro && metro.min != null) { em.textContent = ` · ${metro.min} min a pé do metrô ${metro.estacao}`; em.hidden = false; }
+  else if (REVISAO) { em.replaceChildren(' · ', texto('[falta: min a pé do metrô]')); em.hidden = false; }
+  $('#ab-disp').textContent = CONT.disponivel;
+  $('#ab-res').textContent = CONT.reservada;
+  const barra = $('#ab-barra');
+  barra.replaceChildren(...['disponivel', 'reservada', 'indisponivel'].map((k) => el('i', { class: `ab-b ${k}`, style: `width:${(CONT[k] / CONT.total * 100).toFixed(2)}%` })));
+  barra.setAttribute('aria-label', `${CONT.disponivel} disponíveis, ${CONT.reservada} reservadas e ${CONT.indisponivel} indisponíveis de ${CONT.total}`);
+  // DV2: never "de 80" - the client sees 117 windows
+  $('#ab-total').textContent = `${CONT.total} ${CONFIG.tipologiaPlural} no prédio, ${CONT.naTabela} na ${CONFIG.tabela.toLowerCase()}`;
+  const ap = MET.aPartirDe(UNIDADES);
+  $('#ab-preco').textContent = ap != null ? precoCheio(ap) : '—';
+  $('#ab-m2').textContent = MEDIA ? brlCurto(MEDIA) : '—';
+  const [a0, a1] = MET.faixaArea(UNIDADES);
+  $('#ab-area').textContent = `${capitaliza(CONFIG.tipologia)} · ${a0.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}–${a1.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} m²`;
+  const mod = CART.ficha && CART.ficha.modalidade;
+  const cm = $('#ab-modal');
+  if (mod) { cm.hidden = false; $('#ab-modal-v').textContent = mod; }
+  else if (REVISAO) { cm.hidden = false; $('#ab-modal-v').replaceChildren(texto('[falta: modalidade]')); }
+  const de = MET.destaque(UNIDADES, CART);
+  const bd = $('#ab-destaque');
+  if (de) {
+    const u = de.u;
+    $('#ab-dest-rot').textContent = de.motivo === 'regra' ? 'Destaque da tabela · menor R$/m²' : `Destaque da tabela${de.texto ? ' · ' + de.texto : ''}`;
+    $('#ab-dest-t').textContent = `Unidade ${u.numero} · ${u.andar}º andar · ${m2(u.area_m2)}`;
+    $('#ab-dest-p').textContent = `${precoCheio(u.preco_total)} · ${m2Curto(u.preco_m2)}`;
+    bd.onclick = () => abrirUnidade(u.id);
+    bd.hidden = false;
+  }
+  $('#ab-wa').href = linkWhatsapp(null, 'predio');
+  $('#ab-wa-nome').textContent = CONFIG.corretorCurto;
+  $('#ab-data').textContent = TABELA_LINHA;
 }
 
 // ---------------------------------------------------------------- filters + grid
@@ -118,11 +163,13 @@ function montarGrade() {
         onclick: () => abrirUnidade(u.id) }, u.numero));
     });
   }
-  const c = META.contagem;
+  const c = CONT; // counted from the table (FILA C1), same numbers as META.contagem
   $('#resumo').replaceChildren(
     el('span', {}, el('i', { class: 'dot disponivel' }), el('b', { text: c.disponivel }), ' disponíveis'),
     el('span', {}, el('i', { class: 'dot reservada' }), el('b', { text: c.reservada }), ' reservadas'),
-    el('span', {}, el('i', { class: 'dot indisponivel' }), el('b', { text: c.indisponivel }), ' indisponíveis'));
+    el('span', {}, el('i', { class: 'dot indisponivel' }), el('b', { text: c.indisponivel }), ' indisponíveis'),
+    // DV2: the denominator is said, never "de 80"
+    el('span', { class: 'u-tabela', text: `${c.naTabela} na ${CONFIG.tabela.toLowerCase()} · atualizada em ${dataBR(META.gerada_em)}` }));
 }
 
 // ---------------------------------------------------------------- panels (units list, card)
@@ -175,8 +222,10 @@ function destacarAndar(a) { void a; } // F37: no floor state any more (kept as a
 
 // ---------------------------------------------------------------- unit card
 function linkUnidade(u) { return `${CONFIG.urlPublica || location.href.split('#')[0]}#u${u.numero}`; }
-function linkWhatsapp(u) {
-  const msg = encodeURIComponent(CONFIG.mensagemWhatsapp(u.numero));
+// tipo (spec T5): 'unidade' (default), 'reserva' ("Reservar com"), 'predio' (no unit: building card and tabs)
+function linkWhatsapp(u, tipo = 'unidade') {
+  const txt = tipo === 'predio' || !u ? CONFIG.mensagemPredio : tipo === 'reserva' ? CONFIG.mensagemReserva(u.numero) : CONFIG.mensagemWhatsapp(u.numero);
+  const msg = encodeURIComponent(txt);
   const num = String(CONFIG.whatsapp).replace(/\D/g, '');
   return num.length >= 10 ? `https://wa.me/${num}?text=${msg}` : `https://wa.me/?text=${msg}`;
 }
@@ -204,17 +253,34 @@ function abrirUnidade(id) {
   const planta = PLANTA[u.final];
   const numeroWa = String(CONFIG.whatsapp).replace(/\D/g, '');
   const corpo = $('#card-corpo');
-  corpo.replaceChildren(
+  const vs = temPreco ? MET.vsMedia(u, MEDIA) : null;
+  const sims = MET.similares(u, UNIDADES);
+  const disp = u.situacao === 'disponivel';
+  corpo.replaceChildren(...[ // nulls dropped (replaceChildren would print 'null')
     el('figure', { class: 'cd-foto', style: 'margin:6px 0 14px', onclick: () => abrirGaleria(0) },
       el('img', { src: CONFIG.fotos2026.lista[0].arq, alt: CONFIG.fotos2026.altCard, loading: 'lazy', width: 900, height: 1600 }),
       el('figcaption', { text: CONFIG.tour.legendaCard })),
-    el('p', { class: 'cd-preco' }, temPreco ? brl(u.preco_total).replace(',00', '') : CONFIG.foraDaTabela,
-      el('small', { text: temPreco ? `ato de 30% em ${dataBR(u.ato.data)} + 70% em ${dataBR(u.parcela.data)}` : 'Situação a confirmar com o corretor' })),
-    el('p', { class: 'cd-meta', text: `${m2(u.area_m2)} · ${u.vaga ?? 1} vaga · ${CONFIG.tipologia}` }),
-    el('p', { class: 'cd-sol1', id: 'cd-sol-linha' }, el('span', { class: 'sol-ico', 'aria-hidden': 'true' }), el('span', { text: 'Sol na sacada…' })),
+    // Card do Hugo (spec C): price, R$/m2 vs the table average (only when true: below, or within 1% = "na média"), chips,
+    // payment, rental (only with data), Reservar, similar units. Everything else stays inside "Ver detalhes".
+    el('p', { class: 'cd-preco' }, temPreco ? precoCheio(u.preco_total) : CONFIG.foraDaTabela,
+      temPreco ? null : el('small', { text: 'Situação a confirmar com o corretor' })),
+    temPreco ? el('p', { class: 'cd-m2', id: 'cd-m2' }, el('span', { class: 'mono', text: m2Curto(u.preco_m2) }),
+      vs ? ` · ${vs.tipo === 'abaixo' ? `${pctBR(vs.pct)}% abaixo da média do prédio` : 'na média do prédio'}` : null) : null,
+    el('div', { class: 'cd-chips', id: 'cd-chips' },
+      el('span', { class: 'chip', text: m2(u.area_m2) }),
+      // T5 / 2.3: the units outside the table have vaga null -> never a made-up "1 vaga"
+      el('span', { class: 'chip', text: u.vaga != null ? `${u.vaga} vaga${u.vaga > 1 ? 's' : ''}` : 'vaga a confirmar' }),
+      el('span', { class: 'chip', text: capitaliza(CONFIG.tipologia) }),
+      el('span', { class: 'chip chip-sol', id: 'cd-sol-linha', hidden: true }, el('span', { class: 'sol-ico', 'aria-hidden': 'true' }), el('span', { text: '' }))),
+    // DV4: payment on the first screen (ato + saldo, both with date)
+    temPreco ? el('section', { class: 'cd-pag', id: 'cd-pag' }, el('h3', { text: 'Condição de pagamento' }),
+      el('div', { class: 'cd-pag-l' }, el('span', { text: `Ato ${u.ato.pct}% · ${dataBR(u.ato.data)}` }), el('b', { class: 'mono', text: precoCheio(u.ato.valor) })),
+      el('div', { class: 'cd-pag-l' }, el('span', { text: `Saldo ${u.parcela.pct}% · ${dataBR(u.parcela.data)}` }), el('b', { class: 'mono', text: precoCheio(u.parcela.valor) }))) : null,
+    blocoLocacao(u),
     el('div', { class: 'cd-acoes' },
-      el('a', { class: 'btn-pri', href: linkWhatsapp(u), target: '_blank', rel: 'noopener', id: 'btn-wa' },
-        el('svg', {}), `Chamar no WhatsApp`),
+      // DV7: "Reservar com <corretor>" = the same WhatsApp link with a reservation message (no online booking)
+      el('a', { class: 'btn-pri', href: linkWhatsapp(u, disp ? 'reserva' : 'unidade'), target: '_blank', rel: 'noopener', id: 'btn-wa' },
+        el('svg', {}), disp ? `Reservar com ${CONFIG.corretorCurto}` : `Falar com ${CONFIG.corretorCurto}`),
       // Victor (07/10): the procedural interior looked like 'The Sims' -> "Entrar no apartamento" IS the real tour (splat)
       b7Ativo('interiorProcedural')
         ? el('button', { type: 'button', class: 'btn-sec', id: 'btn-interior', onclick: () => entrarApartamento(u.id) }, 'Entrar no apartamento')
@@ -222,6 +288,10 @@ function abrirUnidade(id) {
       el('button', { type: 'button', class: 'btn-sec', id: 'btn-splat', hidden: true, title: CONFIG.tour.botaoVideoTitulo, onclick: () => entrarApartamento(u.id) },
         CONFIG.tour.botaoVideo, el('small', { class: 'btn-sub', text: CONFIG.tour.botaoVideoSub })),
       numeroWa.length >= 10 ? null : el('p', { class: 'cd-wa-nota so-revisao' }, texto(CONFIG.faltaWhatsapp))),
+    sims.length ? el('section', { class: 'cd-sim', id: 'cd-sim' }, el('h3', { text: 'Similares disponíveis' }),
+      el('div', { class: 'cd-sim-l' }, ...sims.map((v) => el('button', { type: 'button', class: 'cd-sim-b', 'data-num': v.numero, onclick: () => abrirUnidade(v.id), 'aria-label': `Unidade ${v.numero}, ${precoCheio(v.preco_total)}` },
+        el('b', {}, 'Unid. ', el('span', { class: 'mono', text: v.numero })), el('span', { class: 'mono', text: precoMi(v.preco_total) }))))) : null,
+    el('p', { class: 'cd-tabela', text: TABELA_LINHA }),
     el('details', { class: 'detalhes', id: 'detalhes' },
       el('summary', { text: 'Ver detalhes' }),
       el('div', { class: 'det-corpo' },
@@ -229,8 +299,9 @@ function abrirUnidade(id) {
           el('ol', { class: 'pag' },
             el('li', {}, el('span', { text: 'Valor total' }), el('span', { class: 'mono', text: brl(u.preco_total) })),
             el('li', {}, el('span', { text: `Ato · ${u.ato.pct}%` }), el('span', { class: 'mono', text: brl(u.ato.valor) }), el('small', { text: `em ${dataBR(u.ato.data)}` })),
-            el('li', {}, el('span', { text: `Parcela única · ${u.parcela.pct}%` }), el('span', { class: 'mono', text: brl(u.parcela.valor) }), el('small', { text: `em ${dataBR(u.parcela.data)}` })),
-            el('li', {}, el('span', { text: 'R$ por m²' }), el('span', { class: 'mono', text: brl(u.preco_m2) })))) : null,
+            el('li', {}, el('span', { text: `Saldo · ${u.parcela.pct}%` }), el('span', { class: 'mono', text: brl(u.parcela.valor) }), el('small', { text: `em ${dataBR(u.parcela.data)}` })),
+            el('li', {}, el('span', { text: 'R$ por m²' }), el('span', { class: 'mono', text: brl(u.preco_m2) })),
+            MEDIA ? el('li', {}, el('span', { text: 'Média da tabela (R$ por m²)' }), el('span', { class: 'mono', text: brl(MEDIA) })) : null)) : null,
         el('ul', { class: 'avisos' }, ...CONFIG.avisosCard.map((t) => el('li', { text: t }))),
         el('section', { class: 'det-bloco' }, el('h3', { text: 'Planta' }),
           planta ? el('div', { class: `planta-box ${planta.tipo}` }, el('img', { src: CONFIG.planta.arquivo, alt: CONFIG.planta.alt, loading: 'lazy', width: CONFIG.planta.largura, height: CONFIG.planta.altura }))
@@ -244,7 +315,7 @@ function abrirUnidade(id) {
           el('button', { type: 'button', class: 'btn-txt', id: 'btn-copiar', onclick: () => copiarLink(u) }, 'Copiar link desta unidade'),
           el('input', { class: 'link-txt mono', id: 'link-txt', readonly: true, value: linkUnidade(u), 'aria-label': 'Link desta unidade' })),
         el('p', { class: 'legenda-pequena', text: `Fonte: ${CONFIG.fonteTabela}${u.fonte?.includes('pagina') ? ', ' + u.fonte.split(', ')[1].replace('pagina', 'página') : ''}.` }))),
-  );
+  ].filter(Boolean));
   corpo.scrollTop = 0; // 15/10 FILA D15: a new unit always opens at the top (the old scroll position was kept)
   // WhatsApp icon
   const ico = $('#btn-wa svg');
@@ -274,7 +345,8 @@ function abrirUnidade(id) {
     if (app.unidade !== id) return;
     const est = S.rel.info().est;
     const linha = S.resumoSolUnidade(S.SOL, u, est);
-    $('#cd-sol-linha span:last-child').textContent = linha || 'Sol: simulação indisponível';
+    const chip = $('#cd-sol-linha');
+    if (chip) { chip.lastChild.textContent = linha || ''; chip.hidden = !linha; chip.classList.toggle('sem', /^Sem sol/.test(linha || '')); } // T2: no chip without the LiDAR sun data
     // detailed sun (schematic plan + arc) only inside "Ver detalhes", driven by the single sun control
     desligarSolCard();
     const sec = S.secaoSolUnidade(S.rel, CONFIG, u);
@@ -283,11 +355,28 @@ function abrirUnidade(id) {
     app._solLinha = S.rel.ouvir((i) => {
       if (app.unidade !== id) return;
       const l = S.resumoSolUnidade(S.SOL, u, i.est);
-      const n = $('#cd-sol-linha span:last-child');
-      if (n && l) n.textContent = l;
+      const n = $('#cd-sol-linha');
+      if (n) { n.lastChild.textContent = l || ''; n.hidden = !l; n.classList.toggle('sem', /^Sem sol/.test(l || '')); } // DV12: follows the season of the sun panel
     });
   }).catch((e) => console.error(e));
   try { history.replaceState(null, '', `#u${u.numero}`); } catch (e) { /* sandbox */ }
+}
+// Card do Hugo DV6: rental references only with the broker's document (predio.json cartao.locacao, spec T3), with source
+// and period written next to the numbers and the "no guarantee" notice; null -> nothing (in ?revisao=1 a [falta] marker)
+function blocoLocacao(u) {
+  const L = CART.locacao;
+  if (!L) return REVISAO ? el('p', { class: 'cd-loc-falta' }, texto('[falta: condomínio, IPTU, aluguel e diária de referência (documento do corretor)]')) : null;
+  const cel = (rot, v, suf) => (v == null ? null : el('div', { class: 'cd-loc-c' }, el('small', { text: rot }), el('b', { class: 'mono' }, brlCurto(v), suf || '')));
+  const condo = L.condominio ? (L.condominio.porUnidade ?? (L.condominio.porM2 != null && L.condominio.rateio === 'fracao' ? L.condominio.porM2 * u.area_m2 : null)) : null;
+  const iptu = L.iptu ? (L.iptu.porUnidadeMes ?? (L.iptu.porM2 != null ? L.iptu.porM2 * u.area_m2 : null)) : null;
+  const celulas = [cel('Condomínio', condo, '/mês'), cel('IPTU', iptu, '/mês'),
+    cel('Long stay · referência', L.longStay && L.longStay.aluguelMedio, '/mês'), cel('Short stay · diária média', L.shortStay && L.shortStay.diariaMedia)].filter(Boolean);
+  if (!celulas.length) return null;
+  return el('section', { class: 'cd-loc', id: 'cd-loc' },
+    el('div', { class: 'cd-loc-g' }, ...celulas),
+    el('p', { class: 'cd-loc-nota', text: `Referências de locação: ${L.fonte || 'documento do corretor'}${L.periodo ? ', ' + L.periodo : ''}. Não constituem garantia de renda.` }),
+    u.preco_total != null ? el('button', { type: 'button', class: 'cd-simular', id: 'btn-simular',
+      onclick: () => import('./predio-detalhes.js').then((m) => m.abrirSimulador({ u, L, condo, iptu })) }, 'Simular rentabilidade desta unidade') : null);
 }
 function desligarSolCard() {
   if (app._solCard && app._solCard._desligar) app._solCard._desligar();
@@ -536,11 +625,11 @@ function preencherBarraInterior(u) {
       el('ol', { class: 'pag' },
         el('li', {}, el('span', { text: 'Valor total' }), el('span', { class: 'mono', text: brl(u.preco_total) })),
         el('li', {}, el('span', { text: `Ato · ${u.ato.pct}%` }), el('span', { class: 'mono', text: brl(u.ato.valor) }), el('small', { text: `em ${dataBR(u.ato.data)}` })),
-        el('li', {}, el('span', { text: `Parcela única · ${u.parcela.pct}%` }), el('span', { class: 'mono', text: brl(u.parcela.valor) }), el('small', { text: `em ${dataBR(u.parcela.data)}` })))) : null,
+        el('li', {}, el('span', { text: `Saldo · ${u.parcela.pct}%` }), el('span', { class: 'mono', text: brl(u.parcela.valor) }), el('small', { text: `em ${dataBR(u.parcela.data)}` })))) : null,
     el('section', { class: 'det-bloco' }, el('h3', { text: 'Unidade' }),
       el('ol', { class: 'pag' },
         el('li', {}, el('span', { text: 'Área privativa' }), el('span', { class: 'mono', text: m2(u.area_m2) })),
-        el('li', {}, el('span', { text: 'Vaga' }), el('span', { class: 'mono', text: String(u.vaga ?? 1) })),
+        el('li', {}, el('span', { text: 'Vaga' }), el('span', { class: 'mono', text: u.vaga != null ? String(u.vaga) : 'a confirmar' })),
         temPreco ? el('li', {}, el('span', { text: 'R$ por m²' }), el('span', { class: 'mono', text: brl(u.preco_m2) })) : null)),
     el('ul', { class: 'avisos' }, ...CONFIG.avisosCardCurto.map((t) => el('li', { text: t }))),
     el('section', { class: 'det-bloco' }, el('h3', { text: 'Planta' }),
@@ -799,6 +888,12 @@ function fecharAbertura() {
 }
 function ligar() {
   $('#btn-ver').addEventListener('click', fecharAbertura);
+  // DV9: "Ver detalhes do prédio" = sheet with the tabs that have data (Ativo always; Histórico/Mercado/Jurídico/Docs only with data)
+  $('#btn-predio-det').addEventListener('click', () => import('./predio-detalhes.js').then((m) => m.abrirDetalhesPredio({
+    U: UNIDADES, PREDIO, CONFIG, MEDIA, revisao: REVISAO, tabelaLinha: TABELA_LINHA, unidadeRef: MET.destaque(UNIDADES, CART)?.u || null,
+    linkPredio: linkWhatsapp(null, 'predio'),
+    aoVerUnidades: () => fecharAbertura(),
+  })).catch((e) => console.error('detalhes do predio', e)));
   $('#card-fechar').addEventListener('click', fecharCard);
   // F35: back from the card to the list, in the same panel
   $('#card-voltar').addEventListener('click', voltarLista);
