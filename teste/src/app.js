@@ -520,7 +520,7 @@ function preencherBarraInterior(u) {
   // phone (08/10, Victor: no truncated text, only the essentials): line 1 unit + floor, line 2 price; status as a coloured dot
   $('#ib-txt').replaceChildren(el('span', { class: 'ib-l1' }, [el('b', { text: `Unidade ${u.numero}` }), el('span', { class: 'ib-andar', text: ` · ${u.andar}º andar` }),
     el('span', { class: 'ib-sep', text: ' · ' }), el('span', { class: `ib-sit ${u.situacao}`, text: s.rotulo })]),
-    el('span', { class: 'ib-l2' }, [el('span', { class: 'ib-andar-c', text: `${u.andar}º andar${u.preco_total != null ? ' · ' : ''}` }),
+    el('span', { class: 'ib-l2' }, [el('span', { class: 'ib-andar-c' }, `${u.andar}º`, el('span', { class: 'ib-andar-p', text: ' andar' }), u.preco_total != null ? ' · ' : ''), // 16/10: ' andar' drops on <= 370 px screens (index.html)
       u.preco_total != null ? el('span', { class: 'mono ib-preco', text: brl(u.preco_total).replace(',00', '') }) : '',
       // 15/10 FILA D3: the phone bar shows the short price (same format as the hover label), never a cut "R$ 1.125.00"
       u.preco_total != null ? el('span', { class: 'mono ib-preco-curto', text: precoCurtoMi(u.preco_total) }) : '']));

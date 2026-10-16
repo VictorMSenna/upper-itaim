@@ -900,7 +900,8 @@ export function criarCena({ container, predio, unidades, teste = false,
       if (vRot.z > 1) { sp.visible = false; continue; }
       const x = (vRot.x * 0.5 + 0.5) * largura, y = (-vRot.y * 0.5 + 0.5) * altura;
       const hw = sp.scale.x * k * 0.32, hh = sp.scale.y * k * 0.36; // the text fills ~2/3 of the 128x64 canvas
-      sp.visible = !rectsSobre.some(([x0, y0, x1, y1]) => x + hw > x0 && x - hw < x1 && y + hh > y0 && y - hh < y1);
+      // 16/10 wave 1: a label cut by the screen edge ("8h" for "18h" after a zoom) is hidden like one under a button
+      sp.visible = x - hw >= 0 && x + hw <= largura && y - hh >= 0 && y + hh <= altura && !rectsSobre.some(([x0, y0, x1, y1]) => x + hw > x0 && x - hw < x1 && y + hh > y0 && y - hh < y1);
     }
   }
   const vTmpCeu = new THREE.Vector3();
