@@ -11,7 +11,7 @@ import { capacidade, rebaixar } from './capacidade.js';
 import { chaveLocal } from './predio.js';
 import * as THREE from 'three';
 import { SOL } from './dados-sol.js';
-import { MisturaPonto, ROTULO, INFO } from './render-mix.js';
+import { MisturaPonto, ROTULO, INFO, VEU } from './render-mix.js';
 import { solNoInstante } from './interior-sol.js';
 
 let atual = null;
@@ -397,7 +397,7 @@ async function criar({ container, manifesto = 'assets/render/tour360/manifesto.j
       const gm = await import('./google-vista.js');
       try { geoPredio = (await import('./google-geo.js')).GEO_PREDIO; } catch (e) { /* per-point geo only */ }
       const sess = await gm.iniciarGoogle();
-      if (!sess || fechado) return;
+      if (!sess || fechado) { semGoogle(); return; }
       const vista = new gm.VistaGoogle(renderer, sess, { lat: 0, lon: 0, h: 0, rumo: 0 }, () => desenha());
       const mat = gm.materialSobreposicao();
       const geo = new THREE.SphereGeometry(RAIO, 96, 48); geo.scale(-1, 1, 1);
@@ -412,6 +412,9 @@ async function criar({ container, manifesto = 'assets/render/tour360/manifesto.j
         ativoEm: (id) => !falhou && !!(PTS[id].camadas && PTS[id].camadas.fora) && !!geoDoPonto(id),
         aposPintar(id, e) {
           if (!this.ativoEm(id)) return;
+          // 21/10 SACADA-GOOGLE-JA: a new point waits for ITS view (haze of the hour meanwhile, render-mix VEU); before, the 'ready'
+          // of the first point carried over and the balcony showed Google's coarse root tiles (melted blobs) for seconds
+          if (atual !== null && atual !== id && !gm.MODO_FOTO) { vista.pronto = false; vista._lote = null; vista._quieto = 0; }
           const g0 = geoDoPonto(id);
           // follows the unit the client opened: final (side, xy, bearing) + floor from dados/google-geo.json; old per-point geo as fallback
           const g = g0.porUnidade ? g0 : { ...g0, h: g0.h + (andar != null && g0.andar_ref != null ? (andar - g0.andar_ref) * (g0.por_andar || 2.81) : 0) };
@@ -482,7 +485,7 @@ async function criar({ container, manifesto = 'assets/render/tour360/manifesto.j
             mat.uniforms.tG.value = vista.rt.texture; mat.uniforms.res.value.copy(tam);
             const dt = performance.now() - t0; perf.n++; perf.ms += dt; perf.max = Math.max(perf.max, dt);
             if (window.__g3d && window.__g3d.erro && /403|429|quota|key|denied|permission/i.test(window.__g3d.erro)) throw new Error(window.__g3d.erro);
-          } catch (err) { falhou = true; malha.visible = false; vista.credito.hidden = true; try { vista.liberar(); } catch (e2) { /* ignore */ } console.warn('google3d desligado', err && err.message); }
+          } catch (err) { falhou = true; semGoogle(); malha.visible = false; vista.credito.hidden = true; try { vista.liberar(); } catch (e2) { /* ignore */ } console.warn('google3d desligado', err && err.message); }
         },
         // photo mode (phones, 08/10): the window view is shot once per point (cube), then turning only shows that picture
         antesFoto() {
@@ -502,7 +505,7 @@ async function criar({ container, manifesto = 'assets/render/tour360/manifesto.j
             vista.credito.hidden = !malha.visible || op <= 0;
             if ((perf.n++ & 31) === 0) { const rot = raiz.querySelector('.t360-rot'); const topo = Math.min(rot && rot.offsetParent ? rot.getBoundingClientRect().top : innerHeight - 120, ...[...raiz.querySelectorAll('.t360-chip')].map((c) => c.getBoundingClientRect().top)); /* 15/10: the Google credit never under a chip */ const bb = Math.max(78, Math.round(raiz.getBoundingClientRect().bottom - topo + 6)) + 'px'; vista.credito.style.bottom = bb; vista.carga.style.bottom = bb; }
             if (window.__g3d && window.__g3d.erro && /403|429|quota|key|denied|permission/i.test(window.__g3d.erro)) throw new Error(window.__g3d.erro);
-          } catch (err) { falhou = true; malha.visible = false; vista.credito.hidden = true; try { vista.liberar(); } catch (e2) { /* ignore */ } console.warn('google3d desligado', err && err.message); }
+          } catch (err) { falhou = true; semGoogle(); malha.visible = false; vista.credito.hidden = true; try { vista.liberar(); } catch (e2) { /* ignore */ } console.warn('google3d desligado', err && err.message); }
         },
         liberar() { malha.geometry.dispose(); mat.dispose(); cena.remove(malha); vista.liberar(); if (this.vidros) for (const p of this.vidros.values()) p.then((t) => t && t.dispose()); },
       };
@@ -510,13 +513,18 @@ async function criar({ container, manifesto = 'assets/render/tour360/manifesto.j
       G.aposPintar(estado.ponto, esfera(estado.ponto));
       vista.acordar();
       desenha();
-    } catch (err) { G = null; console.warn('google3d indisponivel', err && err.message); }
+    } catch (err) { G = null; semGoogle(); console.warn('google3d indisponivel', err && err.message); }
   }
+  // 21/10 SACADA-GOOGLE-JA: Google off / failed -> our render's city back in the window (the haze was only a wait for Google)
+  function semGoogle() { if (VEU.fora.value) { VEU.fora.value = 0; if (!fechado) repinta(); } }
 
   // ---------------------------------------------------------------- start
   camera.position.copy(paraMundo(PTS[estado.ponto].pos));
   raiz.querySelector('.t360-nome').textContent = PTS[estado.ponto].nome;
   aplicaCam(); redim(); marcaLuzes();
+  // 21/10 SACADA-GOOGLE-JA: from the very first frame the window waits for Google's city with the haze of the hour (no swap of
+  // our render's city for Google's); Google starts loading right below (ligaGoogle), with no gesture needed
+  VEU.fora.value = /[?&]google3d=0/.test(location.search) ? 0 : 1;
   await repinta(); montaHot(); desenha();
   await ligaGoogle();
   raiz.dataset.ready = '1';

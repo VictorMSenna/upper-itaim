@@ -97,6 +97,9 @@ uniform float ambSala;
 uniform float pufeNoite;
 uniform float fatorFora;
 uniform float srgb;
+uniform float veuFora;
+uniform vec3 veuTopo;
+uniform vec3 veuHoriz;
 // v4 gradual sun: per-pixel first/last lit half-minute (t_in, t_out) packed in RGB as 12+12 bits
 uniform sampler2D tAlb;
 uniform sampler2D tNor;
@@ -188,6 +191,7 @@ void main(){
   float l = dot(x, vec3(0.2126, 0.7152, 0.0722));
   x *= (1.0 + 1.0 / ombro) / (1.0 + l / ombro);   // soft highlight roll-off; 08/10 Victor: white bed blown in daylight -> stronger shoulder (1.1)
   vec3 o = neutral(x);
+  if (veuFora > 0.5 && fo > 0.0) o = mix(o, mix(veuHoriz, veuTopo, smoothstep(0.5, 0.78, vUv.y)), fo); // 21/10 SACADA-GOOGLE-JA
   // (B1) 8-bit target (no float RT on this GPU): store sRGB-encoded values so the darks do not band
   if (srgb > 0.5) o = mix(o * 12.92, 1.055 * pow(max(o, vec3(0.0)), vec3(1.0 / 2.4)) - 0.055, step(0.0031308, o));
   gl_FragColor = vec4(o, 1.0);
@@ -250,6 +254,24 @@ function mediaVis(tab, minutos) {
   return ks[ks.length - 1][1];
 }
 const PRETO = new THREE.DataTexture(new Uint8Array([0, 0, 0, 255]), 1, 1); PRETO.needsUpdate = true;
+// 21/10 SACADA-GOOGLE-JA (Victor: 'a nossa cidade 3d aparece na vista interna da sacada (...) quando mexo o mouse aparece o 3D do
+// google, isso e feio'): while Google's city is expected in the window (tour360 sets VEU.fora = 1; 0 with ?google3d=0 or after a
+// Google failure) the 'fora' pixels of EVERY panorama show the sky / haze of the hour instead of our render's city, also during the
+// walk between points; Google's overlay then fades in over that haze. Our render's city only shows as the fallback.
+// Shared uniform objects: one switch for all points. Sky colours = the formula of the Google overlay (ceuDoSol).
+export const VEU = { fora: { value: 0 }, topo: { value: new THREE.Vector3(0.12, 0.27, 0.6) }, horiz: { value: new THREE.Vector3(0.55, 0.66, 0.8) } };
+const smooth_ = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+// sky colours (linear) for the window by sun elevation: day blue, warm horizon around sunrise/sunset, dark night
+// SAME numbers as google-vista.js ceuParaSol (the overlay's sky): kept as a copy on purpose - google-vista.js does not import
+// render-mix.js, so a browser holding a cached old copy of one module never breaks the other; change both together
+export function ceuDoSol(el) {
+  const e = Number.isFinite(el) ? el : -20;
+  const dia = smooth_(-2, 10, e), crep = smooth_(-8, 0, e) * (1 - smooth_(4, 14, e));
+  const L = (a, b, t) => a.map((x, i) => x + (b[i] - x) * t);
+  let topo = L([0.008, 0.012, 0.03], [0.12, 0.27, 0.6], dia), horiz = L([0.02, 0.025, 0.05], [0.55, 0.66, 0.8], dia);
+  topo = L(topo, [0.16, 0.2, 0.42], crep * 0.5); horiz = L(horiz, [0.85, 0.6, 0.42], crep * 0.45);
+  return { topo, horiz };
+}
 
 // One panorama point: owns its layer textures and a render target with the mixed (linear, tone-mapped) result.
 export class MisturaPonto {
@@ -271,7 +293,7 @@ export class MisturaPonto {
         esc: { value: Array(7).fill(1) }, gama: { value: 2.2 }, ombro: { value: +(new URLSearchParams(location.search).get('ombro')) || 1.1 }, joelho: { value: Array(7).fill(0) }, joelho2: { value: Array(7).fill(0.95) }, gamaL: { value: Array(7).fill(2.2) }, y2: { value: Array(7).fill(2) }, ymax: { value: Array(7).fill(4) }, wb: { value: new THREE.Vector3(1, 1, 1) }, expo: { value: 1 }, srgb: { value: half ? 0 : 1 },
         tFora: { value: PRETO }, usaFora: { value: 0 }, pufeGanho: { value: +(new URLSearchParams(location.search).get('pufe')) || pufe.ganho || 0 }, pufeAmb: { value: Number.isFinite(parseFloat(new URLSearchParams(location.search).get('pufeA'))) ? parseFloat(new URLSearchParams(location.search).get('pufeA')) : (pufe.amb ?? 0) },
         pufeAlb: { value: new THREE.Vector3(...(pufe.albedo || [0, 0, 0])) }, corLuz: { value: new THREE.Vector3(1, 1, 1) }, ambSala: { value: 0 }, pufeNoite: { value: 1 }, /* pufeAlb = sRGB (46, 50, 64) linear */ fatorFora: { value: 1 }, modoLum: { value: 0 }, tLoc: { value: PRETO }, sLoc: { value: 0 }, lG: { value: 0 }, dbR: { value: 14 / w }, loIdx: { value: Array(7).fill(-1) }, tL0: { value: PRETO }, tL1: { value: PRETO }, tL2: { value: PRETO }, dbT: { value: (new URLSearchParams(location.search).get('deband') === '0' ? 0 : 3) / 255 },
-        tAlb: { value: PRETO }, tNor: { value: PRETO }, tVis: { value: PRETO }, tVis2: { value: PRETO }, nInt: { value: 0 }, usaVis: { value: 0 }, gDir: { value: new THREE.Vector3() },
+        veuFora: VEU.fora, veuTopo: VEU.topo, veuHoriz: VEU.horiz, tAlb: { value: PRETO }, tNor: { value: PRETO }, tVis: { value: PRETO }, tVis2: { value: PRETO }, nInt: { value: 0 }, usaVis: { value: 0 }, gDir: { value: new THREE.Vector3() },
         solDir: { value: new THREE.Vector3(0, 0, 1) }, meioMin: { value: 0 }, visTam: { value: new THREE.Vector2(1, 1) }, raioVis: { value: Number.isFinite(parseFloat(new URLSearchParams(location.search).get('visr'))) ? parseFloat(new URLSearchParams(location.search).get('visr')) : (capacidade().nivel === 'topo' ? 2 : 1) }, pesoN: { value: new URLSearchParams(location.search).get('visn') === '0' ? 0 : 1 } }, // ?visr=0 = old look, ?visn=0 = no normal weight (tests)
     });
     // 12-bit lamp layers need 3 more samplers (16 in all); smaller GPUs read the top 8 bits only
@@ -432,6 +454,7 @@ void main(){
     const lum = (v) => 0.2126 * v[0] + 0.7152 * v[1] + 0.0722 * v[2];
     const m = pl.mDentro || pl.media, y = lum(m); // v4: expose the room on the room, not on the window
     const el = Number.isFinite(pl.sol.el) ? pl.sol.el : -12;
+    { const cv = ceuDoSol(el); VEU.topo.value.set(...cv.topo); VEU.horiz.value.set(...cv.horiz); } // 21/10 haze of the hour in the window
     // (07/10 Victor: "ilumina de uma vez quando o sol nasce") night and day rules blend over -2..8 deg instead of a
     // switch at 2 deg. Daylight: partial grey-world balance; night: keep most of the warm cast of the lamps (a photo
     // would too), otherwise saturated lamp shades turn blue after the balance

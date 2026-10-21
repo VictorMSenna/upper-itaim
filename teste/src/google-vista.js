@@ -496,7 +496,11 @@ export class VistaGoogle {
     const st = t.stats, pend = st.queued + st.downloading + st.parsing, tempo = agora - F.t0;
     F.prog = (F.i + Math.min(0.99, F.feitosF / (L * L))) / F.faces.length; // share of this face's area already shot
     // only when this region is COMPLETE (queue empty for 3 frames); a full budget or a stuck queue gives up much later
-    F.quietos = pend === 0 && (t.loadProgress === undefined || t.loadProgress >= 1) ? (F.quietos || 0) + 1 : 0;
+    // 21/10 SACADA-GOOGLE-JA (phone, local test): a region could sit with an EMPTY queue and loadProgress < 1 (a tile that never
+    // finishes) and was only shot after the 60 s timeout - or at once when the visitor moved the view (new camera = new queue):
+    // 'aparece o Google quando mexo'. An empty queue for 30 frames now counts as complete too.
+    F.semFila = pend === 0 ? (F.semFila || 0) + 1 : 0;
+    F.quietos = pend === 0 && (t.loadProgress === undefined || t.loadProgress >= 1 || F.semFila >= 30) ? (F.quietos || 0) + 1 : 0;
     const cheio = t.lruCache.isFull();
     if (cheio && w > FOTO_MIN && tempo > 300) { // this region needs more than the budget: split it in 4 and shoot the pieces (off by default: too slow on mid phones, 08/10)
       F.fila.shift(); const h = w / 2; F.fila.unshift([x, y, h], [x + h, y, h], [x, y + h, h], [x + h, y + h, h]);
@@ -524,6 +528,9 @@ export class VistaGoogle {
       { const c = t.lruCache, mx = c.maxBytesSize; if (c.cachedBytes > mx * 0.7) { for (const k of [...t.cameras]) t.deleteCamera(k); c.maxBytesSize = 1; t.update(); c.maxBytesSize = mx; } } // flush only when nearly full (08/10: on 4G the full flush re-downloaded shared tiles every region)
       F.fila.shift(); F.feitosF += w * w; F.reg++; F.t0 = agora;
       if (!F.fila.length) { F.fila = null; F.reg = 0; F.i++; }
+      // 21/10 SACADA-GOOGLE-JA: the window shows Google as soon as the FIRST face (the window's own direction) is shot; faces not
+      // shot yet keep the haze of the hour (render-mix VEU), never our render's city - before, the whole cube had to finish (~1 min)
+      if (F.i >= 1 && !this.pronto) { this.pronto = true; this.tPronto = agora; }
       if (F.i >= F.faces.length && !F.extras && F.faces.length < 4) { // the unit's other points: facade neighbours + down, in the background
         F.extras = true; const p0 = F.faces[0], viz = p0 < 2 ? [4, 5] : p0 > 3 ? [0, 1] : [];
         const add = [...viz, 3].filter((f) => !F.faces.includes(f)).slice(0, 4 - F.faces.length);
@@ -574,7 +581,16 @@ export class VistaGoogle {
     }
     // our render's city (inside the panorama) stays in the window until Google's view is COMPLETE (Victor 07/10: no melted
     // blobs on screen); then Google fades in and stays for this point, even if a new area starts loading
-    if (!this.pronto && st.visible > 0 && (pend === 0 || (this._lote && this._lote.p >= 0.85) || this.s.tiles.lruCache.isFull())) { this.pronto = true; this.tPronto = performance.now(); }
+    // 21/10 SACADA-GOOGLE-JA: the first tiny batch (root tiles only, 7 visible = a flat brown blob) counted as '85 % there' and
+    // faded in 2 s after opening the balcony; now the batch must be >= 200 tiles (the balcony's coarse levels come in batches of
+    // ~50 before the full batch of ~1,100 is queued: 32 still let a 53-tile batch through, local test 12:4x), and 'queue empty'
+    // must hold for 15 frames (between the root and its children the queue is empty for a frame or two)
+    this._quieto = pend === 0 ? (this._quieto || 0) + 1 : 0;
+    const feitosL = this._lote ? Math.max(0, st.loaded - this._lote.base) : 0; // the share NOW (the bar's p is a running max)
+    const loteOk = !!this._lote && feitosL + pend >= 200 && feitosL / (feitosL + pend) >= 0.85;
+    // ... or >= 100 tiles on screen: the balcony view at ~100 tiles already reads as the real city (local test 21/10: 5 s, PC),
+    // the rest keeps refining under it; at < 35 tiles it was the melted blobs. 85 % of ~1,100 took 19 s of plain haze.
+    if (!this.pronto && st.visible > 0 && ((pend === 0 && this._quieto >= 15) || loteOk || st.visible >= 100 || this.s.tiles.lruCache.isFull())) { this.pronto = true; this.tPronto = performance.now(); }
     if (pend === 0) {
       // done: fill the bar, then hide it a moment later (the page may not render again, so a timer does it)
       if (this._lote && !this._some) { barra.style.width = '100%'; this._some = setTimeout(() => { el.hidden = true; this._lote = null; this._some = 0; }, 900); }
