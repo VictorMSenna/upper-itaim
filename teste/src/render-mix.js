@@ -127,6 +127,17 @@ float acesa(vec2 uv){
   if (nInt > 3.5) v += acesaT(tVis2, vec2(uv.x, uv.y * 0.5));
   return min(v, 1.0);
 }
+// 21/10 SOL-FLUIDO: acesa() of every texel is computed ONCE per paint in a prepass (tAc, same texel grid as solvis); the
+// smoothing kernel below reads that value instead of decoding up to 4 interval textures per tap (25 taps x 4 = 100 decodes
+// per pixel on PC). Same numbers at the same texel centres. Compile-time switch (USA_AC, WebGL2 = prepass target available):
+// with it the main program never reads tVis/tVis2, so the sampler count stays at 16 (lamp layers 12-bit use all 16; a runtime
+// switch kept both and the program failed: 'texture image units count exceeds 16', first local test 21/10).
+#ifdef USA_AC
+uniform sampler2D tAc;
+float av(vec2 q){ return texture2D(tAc, q).r; }
+#else
+float av(vec2 q){ return acesa(q); }
+#endif
 uniform float raioVis;
 uniform float pesoN;
 // partial sun (rug fibres, fabric, sheer curtain, penumbra) is stored as a dither of lit / unlit texels: average the
@@ -147,9 +158,9 @@ float visSol(vec2 uv){
     vec2 q = c0 + vec2(float(i), float(j)) * d;
     vec3 n = texture2D(tNor, q).rgb * 2.0 - 1.0;
     float wq = mix(1.0, smoothstep(0.35, 0.8, dot(n, n0)), pesoN) * k; // fabric/rug bump normals still count as the same surface
-    s += acesa(q) * wq; w += wq;
+    s += av(q) * wq; w += wq;
   }
-  return w > 1e-4 ? s / w : acesa(c0);
+  return w > 1e-4 ? s / w : av(c0);
 }
 vec3 neutral(vec3 c){
   const float start = 0.76; const float desat = 0.15;
@@ -274,6 +285,39 @@ export function ceuDoSol(el) {
 }
 
 // One panorama point: owns its layer textures and a render target with the mixed (linear, tone-mapped) result.
+// 21/10 SOL-FLUIDO prepass: per-texel lit fraction of the v4 sun (acesa) into a 1-channel target the size of the solvis grid.
+// One target per renderer (a paint uses it at once, then the next paint overwrites it): no extra memory per tour point.
+const FRAG_AC = `precision highp float;
+varying vec2 vUv;
+uniform sampler2D tVis;
+uniform sampler2D tVis2;
+uniform float nInt;
+uniform float meioMin;
+`
+  + FRAG.slice(FRAG.indexOf('float acesaT('), FRAG.indexOf('// 21/10 SOL-FLUIDO: acesa()'))
+  + 'void main(){ gl_FragColor = vec4(acesa(vUv), 0.0, 0.0, 1.0); }';
+const AC = new WeakMap();
+function prepassoAcesa(r, U) {
+  let a = AC.get(r);
+  if (!a) {
+    const gl = r.getContext(), f16 = r.capabilities.isWebGL2 && (gl.getExtension('EXT_color_buffer_float') || gl.getExtension('EXT_color_buffer_half_float'));
+    const mat = new THREE.ShaderMaterial({ vertexShader: VERT, fragmentShader: FRAG_AC, depthTest: false, depthWrite: false,
+      uniforms: { tVis: { value: PRETO }, tVis2: { value: PRETO }, nInt: { value: 0 }, meioMin: { value: 0 } } });
+    const cena = new THREE.Scene(); cena.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), mat));
+    a = { mat, cena, cam: new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1), rt: null, tipo: f16 ? THREE.HalfFloatType : THREE.UnsignedByteType, ok: r.capabilities.isWebGL2 };
+    AC.set(r, a);
+  }
+  if (!a.ok) return null; // WebGL1: no single-channel render target -> old path
+  const w = Math.round(U.visTam.value.x), h = Math.round(U.visTam.value.y);
+  if (!a.rt || a.rt.width !== w || a.rt.height !== h) {
+    if (a.rt) a.rt.dispose();
+    a.rt = new THREE.WebGLRenderTarget(w, h, { type: a.tipo, format: THREE.RedFormat, depthBuffer: false, generateMipmaps: false, minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter });
+  }
+  const V = a.mat.uniforms; V.tVis.value = U.tVis.value; V.tVis2.value = U.tVis2.value; V.nInt.value = U.nInt.value; V.meioMin.value = U.meioMin.value;
+  const ant = r.getRenderTarget(); r.setRenderTarget(a.rt); r.render(a.cena, a.cam); r.setRenderTarget(ant);
+  return a.rt.texture;
+}
+
 export class MisturaPonto {
   constructor(renderer, ponto, base, { larguraMax = 4096, SOL, unidade = null, finalRender = null, luzes = [], pufe = {} } = {}) {
     this.luzesOrdem = luzes; // C8: manifest cena.luzes (order of the sum kept)
@@ -288,13 +332,13 @@ export class MisturaPonto {
     this.rt.texture.colorSpace = half ? THREE.LinearSRGBColorSpace : THREE.SRGBColorSpace;
     INFO.rtFloat = !!half; INFO.webgl = renderer.capabilities.isWebGL2 ? 2 : 1; INFO.maxTex = renderer.capabilities.maxTextureSize;
     this.mat = new THREE.ShaderMaterial({
-      vertexShader: VERT, fragmentShader: FRAG, depthTest: false, depthWrite: false,
+      vertexShader: VERT, fragmentShader: FRAG, depthTest: false, depthWrite: false, defines: renderer.capabilities.isWebGL2 ? { USA_AC: '' } : {},
       uniforms: { t: { value: Array(7).fill(PRETO) }, g: { value: Array.from({ length: 7 }, () => new THREE.Vector3()) },
         esc: { value: Array(7).fill(1) }, gama: { value: 2.2 }, ombro: { value: +(new URLSearchParams(location.search).get('ombro')) || 1.1 }, joelho: { value: Array(7).fill(0) }, joelho2: { value: Array(7).fill(0.95) }, gamaL: { value: Array(7).fill(2.2) }, y2: { value: Array(7).fill(2) }, ymax: { value: Array(7).fill(4) }, wb: { value: new THREE.Vector3(1, 1, 1) }, expo: { value: 1 }, srgb: { value: half ? 0 : 1 },
         tFora: { value: PRETO }, usaFora: { value: 0 }, pufeGanho: { value: +(new URLSearchParams(location.search).get('pufe')) || pufe.ganho || 0 }, pufeAmb: { value: Number.isFinite(parseFloat(new URLSearchParams(location.search).get('pufeA'))) ? parseFloat(new URLSearchParams(location.search).get('pufeA')) : (pufe.amb ?? 0) },
         pufeAlb: { value: new THREE.Vector3(...(pufe.albedo || [0, 0, 0])) }, corLuz: { value: new THREE.Vector3(1, 1, 1) }, ambSala: { value: 0 }, pufeNoite: { value: 1 }, /* pufeAlb = sRGB (46, 50, 64) linear */ fatorFora: { value: 1 }, modoLum: { value: 0 }, tLoc: { value: PRETO }, sLoc: { value: 0 }, lG: { value: 0 }, dbR: { value: 14 / w }, loIdx: { value: Array(7).fill(-1) }, tL0: { value: PRETO }, tL1: { value: PRETO }, tL2: { value: PRETO }, dbT: { value: (new URLSearchParams(location.search).get('deband') === '0' ? 0 : 3) / 255 },
         veuFora: VEU.fora, veuTopo: VEU.topo, veuHoriz: VEU.horiz, tAlb: { value: PRETO }, tNor: { value: PRETO }, tVis: { value: PRETO }, tVis2: { value: PRETO }, nInt: { value: 0 }, usaVis: { value: 0 }, gDir: { value: new THREE.Vector3() },
-        solDir: { value: new THREE.Vector3(0, 0, 1) }, meioMin: { value: 0 }, visTam: { value: new THREE.Vector2(1, 1) }, raioVis: { value: Number.isFinite(parseFloat(new URLSearchParams(location.search).get('visr'))) ? parseFloat(new URLSearchParams(location.search).get('visr')) : (capacidade().nivel === 'topo' ? 2 : 1) }, pesoN: { value: new URLSearchParams(location.search).get('visn') === '0' ? 0 : 1 } }, // ?visr=0 = old look, ?visn=0 = no normal weight (tests)
+        solDir: { value: new THREE.Vector3(0, 0, 1) }, tAc: { value: PRETO }, meioMin: { value: 0 }, visTam: { value: new THREE.Vector2(1, 1) }, raioVis: { value: Number.isFinite(parseFloat(new URLSearchParams(location.search).get('visr'))) ? parseFloat(new URLSearchParams(location.search).get('visr')) : (capacidade().nivel === 'topo' ? 2 : 1) }, pesoN: { value: new URLSearchParams(location.search).get('visn') === '0' ? 0 : 1 } }, // ?visr=0 = old look, ?visn=0 = no normal weight (tests)
     });
     // 12-bit lamp layers need 3 more samplers (16 in all); smaller GPUs read the top 8 bits only
     this.comLo = gl.getParameter(gl.MAX_TEXTURE_IMAGE_UNITS) >= 16 && new URLSearchParams(location.search).get('lo12') !== '0';
@@ -513,14 +557,33 @@ void main(){
     for (let i = 0; i < 7; i++) U.esc.value[i] *= K;
     U.gDir.value.multiplyScalar(K); U.expo.value = 1;
     // local adaptation: day strength 0.5, night 0.2 (keeps the mood of the lamps); ?sloc= tests, ?sloc=0 = off
+    // 21/10 SOL-FLUIDO: lit fraction per texel once, before the passes that read it (USA_AC programs only)
+    if (U.usaVis.value && this.mat.defines.USA_AC !== undefined) { const tac = prepassoAcesa(this.r, U); if (tac) U.tAc.value = tac; }
     const qs = new URLSearchParams(location.search).get('sloc'), sDia = qs !== null && qs !== '' ? +qs : 0.6;
     U.sLoc.value = 0;
     if (sDia > 0) {
       U.modoLum.value = 1; this.r.setRenderTarget(this.rtLum); this.r.render(this.cena, this.cam); U.modoLum.value = 0;
       this.r.setRenderTarget(this.rtLoc); this.r.render(this.cenaBorra, this.cam);
-      this.r.readRenderTargetPixels(this.rtLoc, 0, 0, 64, 32, this.bufLoc);
-      let sl = 0, sw = 0; // panorama key = coverage- and solid-angle-weighted mean of log2 lum
-      for (let j = 0; j < 32; j++) { const ca = Math.cos(((j + 0.5) / 32 - 0.5) * Math.PI); for (let i = 0; i < 64; i++) { const k = (j * 64 + i) * 4, w = (this.bufLoc[k + 1] / 255) * ca; sl += (((this.bufLoc[k] + this.bufLoc[k + 2] / 255) / 255) * 20 - 16) * w; sw += w; } }
+      // 21/10 SOL-FLUIDO: the synchronous readback flushed the GPU on every paint (measured: ~10 fps of the 360 while the sun
+      // walks). While the sun is moving (a key of this point read < 1.5 s ago) the last key is used and refreshed in the
+      // background (readRenderTargetPixelsAsync); a still picture (or a jump: key off by > 0.1 stop) is repainted exact.
+      const chaveDe = (b) => { let sl = 0, sw = 0;
+      for (let j = 0; j < 32; j++) { const ca = Math.cos(((j + 0.5) / 32 - 0.5) * Math.PI); for (let i = 0; i < 64; i++) { const k = (j * 64 + i) * 4, w = (b[k + 1] / 255) * ca; sl += (((b[k] + b[k + 2] / 255) / 255) * 20 - 16) * w; sw += w; } }
+        return [sl, sw]; };
+      let sl, sw;
+      if (this._chaveLoc && performance.now() - this._chaveLoc.t < 1500 && this.r.readRenderTargetPixelsAsync) {
+        [sl, sw] = this._chaveLoc.v;
+        if (!this._lendo) {
+          this._lendo = true; const b = new Uint8Array(64 * 32 * 4), usado = sw > 0 ? sl / sw : 0;
+          this.r.readRenderTargetPixelsAsync(this.rtLoc, 0, 0, 64, 32, b).then(() => {
+            const v = chaveDe(b); this._chaveLoc = { v, t: performance.now() };
+            if (Math.abs((v[1] > 0 ? v[0] / v[1] : 0) - usado) > 0.1 && this.aoRefinar) setTimeout(() => this.aoRefinar && this.aoRefinar(), 120);
+          }).catch(() => { this._chaveLoc = null; }).finally(() => { this._lendo = false; });
+        }
+      } else {
+        this.r.readRenderTargetPixels(this.rtLoc, 0, 0, 64, 32, this.bufLoc);
+        [sl, sw] = chaveDe(this.bufLoc); this._chaveLoc = { v: [sl, sw], t: performance.now() };
+      }
       U.lG.value = sw > 0 ? sl / sw : 0; U.tLoc.value = this.rtLoc.texture; U.sLoc.value = sDia * (0.4 + 0.6 * kDia);
       // day key on the GEOMETRIC mean (08/10): the arithmetic mean was ruled by small sun patches (porta-varanda 15h exposed
       // 20x lower than the entrance, the room behind went black). Points Victor approved sit at log2 -4.0..-4.8: pull each
