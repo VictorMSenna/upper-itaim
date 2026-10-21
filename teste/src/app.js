@@ -906,8 +906,10 @@ function fecharAbertura() {
 // table (the same unit as the card's 'Destaque'), or the first available one. Same path as a '#u..-dentro' link: the unit card
 // opens behind the tour, so 'Ver por fora' / Esc / back land on that card on the 3D model (PROTOCOLO section 3 no. 2 kept).
 function unidadeDaAbertura() {
-  const d = MET.destaque(UNIDADES, CART)?.u;
-  return d && d.situacao === 'disponivel' ? d : UNIDADES.find((u) => u.situacao === 'disponivel') || d || null;
+  // 21/10 (orchestrator): the balcony view is the product's strength, so the opening button enters the highest available unit,
+  // not the table highlight (unit 32, 3rd floor, low view); ties go to the lowest unit number
+  const disp = UNIDADES.filter((u) => u.situacao === 'disponivel').sort((a, b) => b.andar - a.andar || a.numero - b.numero);
+  return disp[0] || MET.destaque(UNIDADES, CART)?.u || null;
 }
 function entrarPelaAbertura() {
   const u = unidadeDaAbertura(); if (!u) return;
