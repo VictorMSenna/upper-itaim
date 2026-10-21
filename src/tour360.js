@@ -428,6 +428,7 @@ async function criar({ container, manifesto = 'assets/render/tour360/manifesto.j
           // the time-of-day grade + night windows live in the tile shaders (shared with the outside view); here only the
           // brightness match of the window (city behind glass ~1.35x, as before)
           sess.definirLuz(el); mat.uniforms.ganho.value.setScalar((window.__g3dGanho && window.__g3dGanho.dia) || 1.35);
+          { const Gr = gm.gradeGoogle(el); mat.uniforms.ombro.value.set(Gr.joelho, Gr.w); if (window.__g3d) window.__g3d.ganhoJanela = mat.uniforms.ganho.value.x; } // C7 21/10: highlight shoulder after the gain, by day only
           { const c = gm.ceuParaSol(el); mat.uniforms.ceuTopo.value.set(...c.topo); mat.uniforms.ceuHoriz.value.set(...c.horiz); } // sky of the hour in the window
           this.el = el; // night (sun below -2 deg): the window shows our render's night city, not Google's day photos
           // 08/10 glass reflection (varanda looking in): mask of this point's facade glass, if it has one
@@ -498,7 +499,7 @@ async function criar({ container, manifesto = 'assets/render/tour360/manifesto.j
             malha.visible = ve && vista.pronto; malha.position.copy(camera.position); mat.uniforms.espelho.value = 0; mat.uniforms.temJanela.value = 1;
             mat.uniforms.usaCubo.value = 1; { const F = vista.foto, U = mat.uniforms; U.nF.value = F.alvos.length; U.nOk.value = F.feito ? F.alvos.length : F.i;
               F.alvos.forEach((a, k) => { U['fA' + k].value = a.A.texture; U['fW' + k].value = a.W.texture; U.fM.value[k].copy(F.mats[k]); }); }
-            { const L = gm.luzDaCidade(this.el); mat.uniforms.luzBase.value.set(...L.base); mat.uniforms.luzesN.value = L.luzes; } // hour of the day on the picture
+            { const L = gm.luzDaCidade(this.el), Gr = gm.gradeGoogle(this.el); mat.uniforms.luzBase.value.set(...L.base); mat.uniforms.luzesN.value = L.luzes; mat.uniforms.gradeF.value.set(Gr.expo, Gr.contraste, Gr.sat, Gr.pivo); mat.uniforms.ombro.value.set(Gr.joelho, Gr.w); } // hour of the day on the picture (C7: + day grade)
             mat.uniforms.rumoB.value = ((vista.ref.rumo + ((vista.ref.ajuste && vista.ref.ajuste.rumo) || 0)) * Math.PI) / 180;
             vista.progressoFoto(true); // the bar stays while the picture is being made, wherever the visitor looks (Victor 08/10)
             const op = vista.opacidade(); mat.uniforms.forca.value = op; if (op < 1 && malha.visible) vista.acordar();

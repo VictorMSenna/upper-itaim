@@ -97,11 +97,25 @@ export function matrizLocal(lat, lon, h, [dE = 0, dN = 0, dU = 0] = []) {
   return m;
 }
 
+// C7 21/10: g = (exposure, toe contrast, saturation, pivot); identity = (1, 1, 1, any). o = (knee, weight) of the shoulder.
+const GRADE_GLSL = `
+vec3 g3dGrade(vec3 c, vec4 g) {
+  c *= g.x;
+  float y = max(dot(c, vec3(0.2126, 0.7152, 0.0722)), 1e-5);
+  float y2 = y < g.w ? g.w * pow(y / g.w, g.y) : y; // contrast only BELOW the pivot (lifted blacks of the aerial photo); highlights not pushed (Neutral shoulder)
+  c *= y2 / y;
+  return max(mix(vec3(y2), c, g.z), vec3(0.0));
+}
+vec3 g3dOmbro(vec3 x, vec2 o) {
+  vec3 s = o.x + (1.0 - o.x) * (1.0 - exp(-max(x - o.x, vec3(0.0)) / (1.0 - o.x))); // max(): no exp overflow under the knee (inf x 0 = NaN in mix)
+  return mix(x, mix(x, s, step(vec3(o.x), x)), o.y);
+}
+`;
 // time-of-day light of Google's photo city, applied in every tile shader from shared uniforms (never per material)
 const LUZ_GLSL = `
   {
     vec3 cB = outgoingLight;
-    outgoingLight = cB * uLuz;
+    outgoingLight = g3dGrade(cB * uLuz, uGrade); // C7 21/10: day grade (identity at night and in the window photo shots)
     // street lights (same map as our city: R sodium, G LED, B terrain height), on what is near street level
     if (uNoiteG > 0.001 && uTerrExt > 0.0) {
       vec2 rq = (vB5.xz + uTerrExt) / (2.0 * uTerrExt);
@@ -181,6 +195,19 @@ bool g3dFantasma(vec3 p) {
       || g3dSome(texture2D(uMapaP, uv + e.yx)) || g3dSome(texture2D(uMapaP, uv - e.yx));
 }
 `;
+// 21/10 C7 (Victor: Google's city pale / blown out by day, fine at night): DAY grade of the photo city, tied to our sun.
+// Same kind of change the code already applies to the tiles (a global exposure/curve over the whole image, like uLuz):
+// no content changed, Google logo and data attribution untouched (G1-TERMOS U4: colour/light on the tiles = grey zone,
+// kept moderate). Applied on luminance (hue kept): exposure, contrast below a mid-grey pivot (toe), saturation; in the 360 window
+// also a highlight shoulder after the window gain (1.35x clipped the bright facades to 255). Weight w = smooth(-2, 10, sun
+// elevation): 0 with the sun below -2 deg -> late dusk and night EXACTLY as before. ?g3dgrade=0 = off (before/after check).
+export const GRADE_G3D = { expo: 0.85, contraste: 1.3, sat: 1.2, pivo: 0.18, joelho: 0.6 };
+const GRADE_DESL = typeof location !== 'undefined' && /[?&]g3dgrade=0/.test(location.search);
+export function gradeGoogle(el) {
+  const e = Number.isFinite(el) ? el : -20, w = GRADE_DESL ? 0 : smooth(-2, 10, e), G = GRADE_G3D;
+  const m = (v) => +(1 + (v - 1) * w).toFixed(4);
+  return { w: +w.toFixed(4), expo: m(G.expo), contraste: m(G.contraste), sat: m(G.sat), pivo: G.pivo, joelho: G.joelho };
+}
 // same curve as our city (entorno.js gradeEntorno): base grade by sun elevation + window lights at night
 export function luzDaCidade(el) {
   const e = Number.isFinite(el) ? el : -20;
@@ -252,18 +279,18 @@ export function iniciarGoogle() {
       // fragments inside the rectangle and nearer than the tower are dropped (x0 > x1 = off, e.g. in the 360)
       s.recorte = { liga: { value: 0 }, min: { value: new THREE.Vector3() }, max: { value: new THREE.Vector3() }, paraB5: { value: new THREE.Matrix4() }, ecefParaB5: null,
         ret: { value: new THREE.Vector4(1, 1, 0, 0) }, prof: { value: 0 },
-        luz: { value: new THREE.Vector3(1, 1, 1) }, noite: { value: 0 }, frac: { value: 0.25 },
+        luz: { value: new THREE.Vector3(1, 1, 1) }, noite: { value: 0 }, frac: { value: 0.25 }, grade: { value: new THREE.Vector4(1, 1, 1, 0.18) },
         mapa: { value: null }, mapaR: { value: new THREE.Vector4(0, 0, 0, 0) }, camB5: { value: new THREE.Vector3() }, alvoB5: { value: new THREE.Vector3() },
         terr: { value: null }, terrExt: { value: 0 }, ang: { value: null }, angExt: { value: 0 }, lote: { value: Array.from({ length: 24 }, () => new THREE.Vector2()) }, loteN: { value: 0 } };
       const shaderRecorte = (sh) => {
         sh.uniforms.uLote = s.recorte.lote; sh.uniforms.uLoteN = s.recorte.loteN; sh.uniforms.uRecLiga = s.recorte.liga; sh.uniforms.uRecMin = s.recorte.min; sh.uniforms.uRecMax = s.recorte.max; sh.uniforms.uParaB5 = s.recorte.paraB5;
         sh.uniforms.uRet = s.recorte.ret; sh.uniforms.uProf = s.recorte.prof;
-        sh.uniforms.uLuz = s.recorte.luz; sh.uniforms.uNoiteG = s.recorte.noite; sh.uniforms.uFracG = s.recorte.frac;
+        sh.uniforms.uLuz = s.recorte.luz; sh.uniforms.uNoiteG = s.recorte.noite; sh.uniforms.uFracG = s.recorte.frac; sh.uniforms.uGrade = s.recorte.grade;
         sh.uniforms.uMapaP = s.recorte.mapa; sh.uniforms.uMapaR = s.recorte.mapaR; sh.uniforms.uCamB5 = s.recorte.camB5; sh.uniforms.uAlvoB5 = s.recorte.alvoB5;
         sh.uniforms.uTerr = s.recorte.terr; sh.uniforms.uTerrExt = s.recorte.terrExt; sh.uniforms.uAng = s.recorte.ang; sh.uniforms.uAngExt = s.recorte.angExt;
         sh.vertexShader = 'uniform mat4 uParaB5;\nvarying vec3 vB5;\nvarying float vProf;\n' + sh.vertexShader.replace('#include <project_vertex>', '#include <project_vertex>\nvB5 = (uParaB5 * modelMatrix * vec4(transformed, 1.0)).xyz;\nvProf = -mvPosition.z;');
         sh.fragmentShader = 'uniform vec2 uLote[24];\nuniform float uLoteN;\nbool g3dNoLote(vec2 p) { bool d = false; for (int i = 0; i < 24; i++) { if (float(i) >= uLoteN) break; vec2 a = uLote[i], b = uLote[i + 1 < 24 ? i + 1 : 0]; if (float(i + 1) >= uLoteN) b = uLote[0]; if ((a.y > p.y) != (b.y > p.y) && p.x < (b.x - a.x) * (p.y - a.y) / (b.y - a.y) + a.x) d = !d; } return d; }\nuniform float uRecLiga;\nuniform vec3 uRecMin;\nuniform vec3 uRecMax;\nuniform vec4 uRet;\nuniform float uProf;\nvarying vec3 vB5;\nvarying float vProf;\n'
-          + 'uniform vec3 uLuz;\nuniform float uNoiteG;\nuniform float uFracG;\nuniform sampler2D uAng;\nuniform float uAngExt;\nfloat g3dH21(vec2 p) { p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }\n'
+          + 'uniform vec4 uGrade;\n' + GRADE_GLSL + 'uniform vec3 uLuz;\nuniform float uNoiteG;\nuniform float uFracG;\nuniform sampler2D uAng;\nuniform float uAngExt;\nfloat g3dH21(vec2 p) { p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }\n'
           + FANT_GLSL
           + sh.fragmentShader.replace('#include <opaque_fragment>', LUZ_GLSL + '\n#include <opaque_fragment>').replace('void main() {',
           'void main() {\n  if (uRecLiga > 0.5 && all(greaterThan(vB5, uRecMin)) && all(lessThan(vB5, uRecMax))) discard;\n  if (uRecLiga > 0.5 && uLoteN > 2.5 && vB5.y > uRecMin.y && vB5.y < uRecMax.y && g3dNoLote(vB5.xz)) discard;\n  if (g3dFantasma(vB5)) discard;');
@@ -288,7 +315,7 @@ export function iniciarGoogle() {
       };
       // time of day for ALL tiles (shared uniforms; per-material colour left stale tints on cached tiles = patches)
       s.pintar = () => {};
-      s.definirLuz = (el) => { const L = luzDaCidade(el); s.recorte.luz.value.set(L.base[0], L.base[1], L.base[2]); s.recorte.noite.value = L.luzes; };
+      s.definirLuz = (el) => { const L = luzDaCidade(el), Gr = gradeGoogle(el); s.recorte.luz.value.set(L.base[0], L.base[1], L.base[2]); s.recorte.noite.value = L.luzes; s.recorte.grade.value.set(Gr.expo, Gr.contraste, Gr.sat, Gr.pivo); STATUS.luz = { el: Number.isFinite(el) ? +el.toFixed(2) : null, base: L.base.map((x) => +x.toFixed(4)), luzes: +L.luzes.toFixed(4), grade: Gr }; };
       await new Promise((ok, falha) => {
         const t = setTimeout(() => falha(new Error('timeout da raiz')), 20000);
         const aoRaiz = () => { clearTimeout(t); STATUS.raiz++; tiles.removeEventListener('load-root-tileset', aoRaiz); ok(); };
@@ -516,7 +543,7 @@ export class VistaGoogle {
     if ((F.quietos >= 3 && tempo > 200) || (cheio && pend === 0 && tempo > 12000) || tempo > 60000) {
       F.quietos = 0; F.log.push({ f: F.faces[F.i], r: F.reg, ms: Math.round(tempo), cheio: t.lruCache.isFull(), mb: Math.round(t.lruCache.cachedBytes / 1048576), vis: st.visible });
       const r = this.r, cc = r.getClearColor(new THREE.Color()), ca = r.getClearAlpha(), ant = r.getRenderTarget(), al = F.alvos[F.i];
-      const R = this.s.recorte, luz0 = R.luz.value.clone(), noite0 = R.noite.value;
+      const R = this.s.recorte, luz0 = R.luz.value.clone(), noite0 = R.noite.value, grade0 = R.grade.value.clone();
       r.setClearColor(0x000000, 0);
       const pinta = (rt, lado) => {
         const k = lado / L, vx = Math.round(x * k), vy = Math.round((L - y - w) * k), vw = Math.round(w * k);
@@ -525,9 +552,9 @@ export class VistaGoogle {
         r.setRenderTarget(rt); r.clear(); r.render(this.s.escena, cam);
         rt.scissorTest = false; rt.viewport.set(0, 0, lado, lado);
       };
-      R.luz.value.set(1, 1, 1); R.noite.value = 0; pinta(al.A, FOTO_LADO);
+      R.luz.value.set(1, 1, 1); R.noite.value = 0; R.grade.value.set(1, 1, 1, 0.18); pinta(al.A, FOTO_LADO); // C7: A stays the raw photo city; the overlay grades it by the hour
       R.luz.value.set(0, 0, 0); R.noite.value = 1; pinta(al.W, FOTO_LADO_W);
-      R.luz.value.copy(luz0); R.noite.value = noite0;
+      R.luz.value.copy(luz0); R.noite.value = noite0; R.grade.value.copy(grade0);
       r.setRenderTarget(ant); r.setClearColor(cc, ca);
       this.atualizaCredito();
       // flush: every tile of the region just shot leaves memory now (the LRU kept them: the budget filled region after region)
@@ -671,7 +698,10 @@ uniform vec3 luzBase;
 uniform float luzesN;
 uniform float usaCubo;
 uniform float rumoB;
-// 08/10 glass of the facade seen from the balcony (Victor: the city reflected in it was gone; with Google's 3D): tV.r = glass,
+// C7 21/10: gradeF = day grade of the PHOTO cube (live mode is graded in the tile shader); ombro = (knee, weight) after the gain
+uniform vec4 gradeF;
+uniform vec2 ombro;
+${GRADE_GLSL}// 08/10 glass of the facade seen from the balcony (Victor: the city reflected in it was gone; with Google's 3D): tV.r = glass,
 // tV.g = reflectance shape by incidence angle (gera_mascara_vidro.py). The reflected direction is the view direction mirrored
 // across the facade (forward component flips). Photo mode reads it from the same cube; live mode (computers) draws a
 // mirrored camera into tG when the glass, not the window, is on screen (espelho = 1, image flipped in x).
@@ -707,7 +737,7 @@ bool cubo(vec3 d, out vec4 g){
     else if (k == 1) { a = texture2D(fA1, uv); w = texture2D(fW1, uv).rgb; }
     else if (k == 2) { a = texture2D(fA2, uv); w = texture2D(fW2, uv).rgb; }
     else { a = texture2D(fA3, uv); w = texture2D(fW3, uv).rgb; }
-    g = vec4(a.rgb * luzBase + w * luzesN, a.a);
+    g = vec4(g3dGrade(a.rgb * luzBase, gradeF) + w * luzesN, a.a);
     return true;
   }
   return false;
@@ -723,7 +753,7 @@ void main(){
   if (m > 0.002 && temJanela > 0.5) { // the window: Google's city where the pano's 'fora' mask is open
     vec4 g; bool ok = true;
     if (usaCubo > 0.5) ok = cubo(d, g); else g = texture2D(tG, gl_FragCoord.xy / res);
-    if (ok) { float aw = m * forca; rgb += paraSrgb(mix(ceu, g.rgb * ganho, g.a)) * aw; a += aw; } // face not shot yet: our render's city stays
+    if (ok) { float aw = m * forca; rgb += paraSrgb(mix(ceu, g3dOmbro(g.rgb * ganho, ombro), g.a)) * aw; a += aw; } // face not shot yet: our render's city stays
   }
   if (usaVidro > 0.5) {
     vec2 v = texture2D(tV, vUv).rg;
@@ -751,7 +781,7 @@ void main(){
       if (ok) {
         float w = v.r * (0.25 + 0.75 * v.g) * forcaV * forca;
         // day: covers the reflection of our render's city baked in the pano; night: adds the lit city on the dark glass
-        rgb += paraSrgb(mix(pR, mix(ceu, g.rgb * ganho, g.a), mR)) * w; a += w * kDiaV; // 08/10 Victor: the floor of the balcony blocks the city in the reflection
+        rgb += paraSrgb(mix(pR, mix(ceu, g3dOmbro(g.rgb * ganho, ombro), g.a), mR)) * w; a += w * kDiaV; // 08/10 Victor: the floor of the balcony blocks the city in the reflection
       }
     }
   }
@@ -765,6 +795,7 @@ export function materialSobreposicao() {
     uniforms: { tG: { value: null }, tM: { value: null }, res: { value: new THREE.Vector2(1, 1) }, ganho: { value: new THREE.Vector3(1, 1, 1) }, forca: { value: 1 }, fA0: { value: null }, fA1: { value: null }, fA2: { value: null }, fA3: { value: null }, fW0: { value: null }, fW1: { value: null }, fW2: { value: null }, fW3: { value: null },
       fM: { value: [new THREE.Matrix4(), new THREE.Matrix4(), new THREE.Matrix4(), new THREE.Matrix4()] }, nF: { value: 0 }, nOk: { value: 0 }, luzBase: { value: new THREE.Vector3(1, 1, 1) }, luzesN: { value: 0 }, usaCubo: { value: 0 }, rumoB: { value: 0 },
       tV: { value: null }, usaVidro: { value: 0 }, tGV: { value: null }, temJanela: { value: 1 }, caixaMin: { value: new THREE.Vector3() }, caixaMax: { value: new THREE.Vector3() } /* C8: set from the manifest vidro.caixa (usaCaixa) */, usaCaixa: { value: 0 }, tPano: { value: null }, panoSrgb: { value: 0 }, espelho: { value: 0 }, forcaV: { value: forcaV }, kDiaV: { value: 1 },
+      gradeF: { value: new THREE.Vector4(1, 1, 1, 0.18) }, ombro: { value: new THREE.Vector2(0.6, 0) },
       ceuTopo: { value: new THREE.Vector3(0.12, 0.27, 0.6) }, ceuHoriz: { value: new THREE.Vector3(0.55, 0.66, 0.8) } },
   });
 }
