@@ -330,6 +330,10 @@ function abrirUnidade(id) {
   // F35: one right-side panel = one navigation stack: the card replaces the list (desktop and phone)
   estavaListaAberta = !$('#unidades').hidden; $('#unidades').hidden = true;
   $('#card').hidden = false;
+  // 21/10 D15b: reset the scroll again once the card is visible. Coming back from the list the card was display:none when
+  // the scroll was reset above (ignored there) and the browser restored the old position (494 px = end of the card).
+  corpo.scrollTop = 0;
+  requestAnimationFrame(() => { if (app.unidade === id) corpo.scrollTop = 0; });
   atualizarPainel();
   // the single "Entrar no apartamento" button: the 360 tour when its manifest is live (08:15 switch), else the real video tour.
   // 15/10 D16: the video tour (splat) is off (decision 1) and its files are never published: probe it only when the 360 is absent
