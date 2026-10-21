@@ -208,7 +208,8 @@ export function iniciarGoogle() {
       const gltf = new GLTFLoader(tiles.manager); gltf.setDRACOLoader(draco);
       tiles.manager.addHandler(/\.gltf$/, gltf);
       tiles.errorTarget = 8;                      // detail: close, narrow views (each view sets its own below)
-      if (tiles.downloadQueue) tiles.downloadQueue.maxJobs = 30; if (tiles.parseQueue) tiles.parseQueue.maxJobs = capacidade().parse; // fewer parses per frame on phones: less stutter while loading
+      if (tiles.downloadQueue) { if ('maxJobsPerOrigin' in tiles.downloadQueue) tiles.downloadQueue.maxJobsPerOrigin = 30; else tiles.downloadQueue.maxJobs = 30; } // 21/10: 0.5.3 renamed it (the old name = same setter + a console warning)
+      if (tiles.parseQueue) tiles.parseQueue.maxJobs = capacidade().parse; // fewer parses per frame on phones: less stutter while loading
       // 07/10: at 300 MB the cache was FULL (315 MB) and the renderer refused every finer tile -> coarse city. The full-detail
       // view needs more; ?gmb=<MB> overrides for measuring. Same on phones (high-end target): no coarsening.
       // budget by device: phones report navigator.deviceMemory (GB, capped at 8); measured 07/10: outside view ~600 MB of tiles
@@ -221,6 +222,11 @@ export function iniciarGoogle() {
       tiles.autoDisableRendererCulling = true;
       const escena = new THREE.Scene(); escena.add(tiles.group);
       const s = { tiles, escena, TilesRenderer, dono: null, cor: [1, 1, 1] };
+      // 21/10 NO-CAMERAS: the cache flushes (passoFoto, soltaCache) drop every camera ON PURPOSE and run one traversal so the LRU
+      // unloads what no view uses. TilesRenderer.update() = the base update + console.warn('no cameras defined') when it has no camera
+      // (4x per window photo on mid phones, root 21/10). The flush calls the base update itself: same traversal and unload, no warning.
+      const atualizaBase = Object.getPrototypeOf(TilesRenderer.prototype).update;
+      s.esvaziar = () => { if (typeof atualizaBase === 'function') atualizaBase.call(tiles); else tiles.update(); };
       // ONE tiles set serves two views (outside scene and 360 window). Whoever draws takes it: its scene, its frame, ONLY its
       // camera (a forgotten camera keeps loading tiles for a view nobody sees) and its detail target.
       s.tomar = (quem, pai, matriz, cam, erro) => {
@@ -504,7 +510,7 @@ export class VistaGoogle {
     const cheio = t.lruCache.isFull();
     if (cheio && w > FOTO_MIN && tempo > 300) { // this region needs more than the budget: split it in 4 and shoot the pieces (off by default: too slow on mid phones, 08/10)
       F.fila.shift(); const h = w / 2; F.fila.unshift([x, y, h], [x + h, y, h], [x, y + h, h], [x + h, y + h, h]);
-      const c = t.lruCache, mx = c.maxBytesSize; for (const k of [...t.cameras]) t.deleteCamera(k); c.maxBytesSize = 1; t.update(); c.maxBytesSize = mx;
+      const c = t.lruCache, mx = c.maxBytesSize; for (const k of [...t.cameras]) t.deleteCamera(k); c.maxBytesSize = 1; this.s.esvaziar(); c.maxBytesSize = mx;
       F.t0 = agora; F.quietos = 0; this.acordar(); return;
     }
     if ((F.quietos >= 3 && tempo > 200) || (cheio && pend === 0 && tempo > 12000) || tempo > 60000) {
@@ -525,7 +531,7 @@ export class VistaGoogle {
       r.setRenderTarget(ant); r.setClearColor(cc, ca);
       this.atualizaCredito();
       // flush: every tile of the region just shot leaves memory now (the LRU kept them: the budget filled region after region)
-      { const c = t.lruCache, mx = c.maxBytesSize; if (c.cachedBytes > mx * 0.7) { for (const k of [...t.cameras]) t.deleteCamera(k); c.maxBytesSize = 1; t.update(); c.maxBytesSize = mx; } } // flush only when nearly full (08/10: on 4G the full flush re-downloaded shared tiles every region)
+      { const c = t.lruCache, mx = c.maxBytesSize; if (c.cachedBytes > mx * 0.7) { for (const k of [...t.cameras]) t.deleteCamera(k); c.maxBytesSize = 1; this.s.esvaziar(); c.maxBytesSize = mx; } } // flush only when nearly full (08/10: on 4G the full flush re-downloaded shared tiles every region)
       F.fila.shift(); F.feitosF += w * w; F.reg++; F.t0 = agora;
       if (!F.fila.length) { F.fila = null; F.reg = 0; F.i++; }
       // 21/10 SACADA-GOOGLE-JA: the window shows Google as soon as the FIRST face (the window's own direction) is shot; faces not
@@ -551,7 +557,7 @@ export class VistaGoogle {
     this._guardaCache();
     for (const k of [...t.cameras]) t.deleteCamera(k);
     c.minBytesSize = 0; c.maxBytesSize = 1; c.unloadPercent = 1;
-    t.update();
+    this.s.esvaziar();
     this._solto = true;
   }
   restauraCache() {
