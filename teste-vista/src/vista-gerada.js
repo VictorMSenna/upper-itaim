@@ -34,6 +34,11 @@ uniform vec3 nevoa;        // haze colour of the hour (low sun / dusk)
 uniform float forca;
 uniform float alfaMeio;
 uniform float kCeuFoto;    // v2: the drone's own cloudy sky by day (faded above 18-28 deg, where the stitch ends)
+uniform sampler2D tCeu;    // v2.1: real cloud dome (drone), lon/lat at infinity, alpha = clouds (fades to the clear zenith)
+uniform vec4 faixaCeu;     // lon0, lon1, lat0, lat1 (radians) of tCeu
+uniform float usaCeu;
+uniform vec4 pesos;        // manha, ouro (17h gold), crep (18h30 dusk), noite
+uniform vec3 zenite;       // clear-sky zenith colour of the hour (linear)
 vec3 lin(vec3 c){ return pow(max(c, vec3(0.0)), vec3(2.2)); }
 vec3 paraSrgb(vec3 c){ c = max(c, vec3(0.0)); return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c)); }
 void main(){
@@ -52,6 +57,36 @@ void main(){
   vec2 uv = vec2((lon - faixa.x) / (faixa.y - faixa.x), (lat - faixa.z) / (faixa.w - faixa.z));
   float el = asin(clamp(r.z, -1.0, 1.0));
   vec3 ceu = mix(ceuHoriz, ceuTopo, smoothstep(0.0, 0.75, el));
+  if (usaCeu > 0.5) {   // v2.1: the REAL clouds at every hour, painted per hour (gold rims, pink/orange dusk, dark clouds at night)
+    float lonR = atan(r.y, r.x);
+    vec2 uc = vec2((lonR - faixaCeu.x) / (faixaCeu.y - faixaCeu.x), (el - faixaCeu.z) / (faixaCeu.w - faixaCeu.z));
+    vec4 S = texture2D(tCeu, clamp(uc, vec2(0.0005), vec2(0.9995)));
+    vec3 cs = lin(S.rgb);
+    float ls = dot(cs, vec3(0.2126, 0.7152, 0.0722));
+    float azul = clamp((cs.b - cs.r) / (cs.b + 0.02), 0.0, 1.0);
+    float nuvem = 1.0 - smoothstep(0.18, 0.78, azul);          // white/grey = cloud, saturated blue = clear sky
+    float aS = S.a;   // below 0 deg (higher floors see the sky dip under the eye line) = the horizon row of the dome
+    // day: the photo, filtered like the city
+    vec3 dia = cs * tinta * expo;
+    dia = mix(zenite, dia, aS);
+    // 17h gold: warm cast + lit cloud rims (the brightest cloud tops catch the low sun)
+    vec3 ouro = cs * vec3(1.32, 0.95, 0.62) * expo + nuvem * pow(ls, 1.4) * vec3(0.95, 0.48, 0.10);
+    ouro = mix(zenite, ouro, aS);
+    // 18h30 dusk: clouds pink/orange (orange near the horizon), the clear sky blue, darker above
+    float baixo = smoothstep(0.45, 0.02, el);
+    vec3 corN = mix(vec3(0.95, 0.40, 0.42), vec3(1.05, 0.52, 0.22), baixo) * (0.10 + 0.85 * pow(ls, 0.8));
+    vec3 corC = mix(ceuHoriz, ceuTopo, smoothstep(0.0, 0.7, el)) * (0.55 + 0.9 * ls);
+    vec3 crep = mix(corC, corN, nuvem);
+    crep = mix(mix(ceuHoriz, ceuTopo, smoothstep(0.0, 0.75, el)), crep, aS);
+    // 21h: dark clouds over navy, lit from below by the city near the horizon
+    vec3 noiteN = vec3(0.020, 0.026, 0.050) * (0.5 + 1.6 * ls) + vec3(0.060, 0.034, 0.016) * smoothstep(0.30, 0.0, el);
+    vec3 noite = mix(mix(ceuHoriz, ceuTopo, smoothstep(0.0, 0.75, el)), noiteN, nuvem * aS);
+    vec3 cc = mix(dia, ouro, pesos.y);
+    cc = mix(cc, crep, pesos.z);
+    cc = mix(cc, noite, pesos.w);
+    ceu = cc;
+  }
+  ceu += vec3(0.11, 0.06, 0.028) * kNoite * exp(-max(el, 0.0) / 0.06);   // city glow on the horizon at night
   vec3 cor = ceu;
   if (uv.x > 0.0 && uv.x < 1.0 && uv.y > 0.0 && uv.y < 1.0) {
     vec4 B = texture2D(tBase, uv);
@@ -61,10 +96,7 @@ void main(){
     x = mix(vec3(l), x, sat);
     x = 0.18 * pow(max(x, vec3(0.0)) / 0.18, vec3(contraste));
     x = x * (1.0 - escuro) + lin(texture2D(tNoite, uv).rgb) * kNoite;
-    vec3 cf = lin(B.rgb) * mix(vec3(1.0), tinta, 0.6) * expo;
-    float wf = kCeuFoto * smoothstep(0.36, 0.21, lat);   // fade the real sky out between 21 and 12 deg (the stitch border lies above)
-    vec3 ceuF = mix(ceu, cf, wf);
-    cor = mix(ceuF, x, B.a);
+    cor = mix(ceu, x, B.a);
   }
   float aw = m * forca;
   gl_FragColor = vec4(paraSrgb(cor) * aw, aw);             // premultiplied (blend ONE, ONE_MINUS_SRC_ALPHA)
@@ -100,8 +132,13 @@ function filtroDaHora(el, minutos) {
   topo = mistura(topo, [0.28, 0.40, 0.68], Math.max(ouro, ouroM)); horiz = mistura(horiz, [1.0, 0.70, 0.40], Math.max(ouro, ouroM));
   topo = mistura(topo, [0.10, 0.14, 0.40], crep); horiz = mistura(horiz, [0.98, 0.56, 0.58], crep);
   topo = mistura(topo, [0.006, 0.012, 0.045], noite); horiz = mistura(horiz, [0.035, 0.05, 0.13], noite);
-  const kCeuFoto = suave(2, 14, el) * (1 - 0.5 * ouro);   // real clouds by day, the gradient takes over at golden hour/dusk/night
-  return { kCeuFoto, tinta, expo, sat, contraste, kNoite, escuro: 0, topo, horiz, nevoa: horiz, pesos: { manha, ouro, crep, noite } };
+  const kCeuFoto = 0;
+  // clear-sky zenith above the real clouds (linear): photo blue by day, deeper at gold, violet-blue at dusk, navy at night
+  let zenite = mistura([0.09, 0.22, 0.62], [0.10, 0.20, 0.55], manha);
+  zenite = mistura(zenite, [0.10, 0.17, 0.42], ouro);
+  zenite = mistura(zenite, [0.05, 0.07, 0.24], crep);
+  zenite = mistura(zenite, [0.004, 0.008, 0.03], noite);   // real clouds by day, the gradient takes over at golden hour/dusk/night
+  return { kCeuFoto, zenite, tinta, expo, sat, contraste, kNoite, escuro: 0, topo, horiz, nevoa: horiz, pesos: { manha, ouro, crep, noite } };
 }
 
 async function criarVistaGerada({ cena, PTS, andar, final, RAIO, base = "assets/vista-gerada/" }) {
@@ -116,7 +153,7 @@ async function criarVistaGerada({ cena, PTS, andar, final, RAIO, base = "assets/
     t.colorSpace = THREE.NoColorSpace; t.generateMipmaps = true; t.minFilter = THREE.LinearMipmapLinearFilter; t.magFilter = THREE.LinearFilter;
     t.anisotropy = 4; ok(t);
   }, undefined, () => ok(null)));
-  const [tBase, tNoite] = await Promise.all([carrega(face.base), carrega(face.noite)]);
+  const [tBase, tNoite, tCeu] = await Promise.all([carrega(face.base), carrega(face.noite), face.ceu ? carrega(face.ceu) : Promise.resolve(null)]);
   if (!tBase) return null;
   const preto = new THREE.DataTexture(new Uint8Array([0, 0, 0, 255]), 1, 1); preto.needsUpdate = true;
   const U = {
@@ -124,7 +161,8 @@ async function criarVistaGerada({ cena, PTS, andar, final, RAIO, base = "assets/
     O: { value: new THREE.Vector3() }, R: { value: face.raio_m }, chao: { value: face.chao_m },
     faixa: { value: new THREE.Vector4(...face.lon.map((x) => x * Math.PI / 180), ...face.lat.map((x) => x * Math.PI / 180)) },
     tinta: { value: new THREE.Vector3(1, 1, 1) }, expo: { value: 1 }, sat: { value: 1 }, contraste: { value: 1 }, kNoite: { value: 0 }, escuro: { value: 0 },
-    kCeuFoto: { value: 0 }, alfaMeio: { value: face.alfa_meio ? 1 : 0 }, ceuTopo: { value: new THREE.Vector3() }, ceuHoriz: { value: new THREE.Vector3() }, nevoa: { value: new THREE.Vector3() }, forca: { value: 1 },
+    kCeuFoto: { value: 0 }, tCeu: { value: tCeu || preto }, usaCeu: { value: tCeu ? 1 : 0 }, pesos: { value: new THREE.Vector4() }, zenite: { value: new THREE.Vector3() },
+    faixaCeu: { value: new THREE.Vector4(...(face.ceu_lon || [-95, 105]).map((x) => x * Math.PI / 180), ...(face.ceu_lat || [0, 70]).map((x) => x * Math.PI / 180)) }, alfaMeio: { value: face.alfa_meio ? 1 : 0 }, ceuTopo: { value: new THREE.Vector3() }, ceuHoriz: { value: new THREE.Vector3() }, nevoa: { value: new THREE.Vector3() }, forca: { value: 1 },
   };
   const mat = new THREE.ShaderMaterial({ vertexShader: VERT, fragmentShader: FRAG, uniforms: U, transparent: true, depthTest: false, depthWrite: false,
     blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneMinusSrcAlphaFactor });
@@ -157,7 +195,7 @@ async function criarVistaGerada({ cena, PTS, andar, final, RAIO, base = "assets/
     aplicaHora(el, minutos) {
       const F = filtroDaHora(el, minutos);
       U.tinta.value.set(...F.tinta); U.expo.value = F.expo; U.sat.value = F.sat; U.contraste.value = F.contraste; U.kNoite.value = F.kNoite; U.escuro.value = F.escuro;
-      U.kCeuFoto.value = (face.ceu_foto ? 1 : 0) * F.kCeuFoto; U.ceuTopo.value.set(...F.topo); U.ceuHoriz.value.set(...F.horiz); U.nevoa.value.set(...F.nevoa);
+      U.kCeuFoto.value = 0; U.pesos.value.set(F.pesos.manha, F.pesos.ouro, F.pesos.crep, F.pesos.noite); U.zenite.value.set(...F.zenite); U.ceuTopo.value.set(...F.topo); U.ceuHoriz.value.set(...F.horiz); U.nevoa.value.set(...F.nevoa);
       if (typeof window !== "undefined") window.__vistaGerada = { ponto: atual, el: +el.toFixed(2), minutos, O: U.O.value.toArray().map((x) => +x.toFixed(2)), andar: nAndar, ...F };
     },
     antes(camera, ponto, andando) {
@@ -165,7 +203,7 @@ async function criarVistaGerada({ cena, PTS, andar, final, RAIO, base = "assets/
       malha.visible = ve; credito.hidden = !ve;
       if (ve) malha.position.copy(camera.position);
     },
-    liberar() { cena.remove(malha); geo.dispose(); mat.dispose(); tBase.dispose(); if (tNoite) tNoite.dispose(); credito.remove(); css.remove(); },
+    liberar() { cena.remove(malha); geo.dispose(); mat.dispose(); tBase.dispose(); if (tNoite) tNoite.dispose(); if (tCeu) tCeu.dispose(); credito.remove(); css.remove(); },
   };
   return VG;
 }
