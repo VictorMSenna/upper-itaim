@@ -587,22 +587,29 @@ void main(){
       for (let j = 0; j < 32; j++) { const ca = Math.cos(((j + 0.5) / 32 - 0.5) * Math.PI); for (let i = 0; i < 64; i++) { const k = (j * 64 + i) * 4, w = (b[k + 1] / 255) * ca; sl += (((b[k] + b[k + 2] / 255) / 255) * 20 - 16) * w; sw += w; } }
         return [sl, sw]; };
       let sl, sw;
-      if (this._chaveLoc && performance.now() - this._chaveLoc.t < 1500 && this.r.readRenderTargetPixelsAsync) {
+      // 22/10 MANCHAS-360: the key is reused only while the sun MOVES in small steps from the previous paint of this point (same
+      // season and lamps, <= 60 min: dragging / holding the sun bar = 1 h/s by day, the night in 3 s; a short tap = 30 min). A jump (tap on another hour, season, lamps, opening) reads
+      // the key at once: with the GPU busy the background readback took up to 4.5 s and the jump showed the old hour's exposure.
+      const ant = this._anterior; this._anterior = usado; const seq = this._seq = (this._seq || 0) + 1;
+      const dMin = ant ? Math.abs(ant.minutos - usado.minutos) : 1e9, passo = Math.min(dMin, 1440 - dMin);
+      const continuo = !!ant && ant.estacao === usado.estacao && JSON.stringify(ant.luzes) === JSON.stringify(usado.luzes) && passo <= 60;
+      if (this._chaveLoc && performance.now() - this._chaveLoc.t < 1500 && continuo && this.r.readRenderTargetPixelsAsync) {
         [sl, sw] = this._chaveLoc.v;
         // 22/10 MANCHAS-360 (measured: entrada 12:00 kept the 09:00 key, expo 3.272 vs 2.678 = 0.29 stop, never corrected): a paint
         // that reused the key while another readback was in flight was never checked (that readback compares the key of the paint
         // that ISSUED it). It now asks for one more paint when the readback lands; that paint reads its own key back.
         if (this._lendo) this._reler = true;
         else {
-          this._lendo = true; this._reler = false; const b = new Uint8Array(64 * 32 * 4), usado = sw > 0 ? sl / sw : 0;
+          this._lendo = true; this._reler = false; const b = new Uint8Array(64 * 32 * 4), chaveUsada = sw > 0 ? sl / sw : 0;
           this.r.readRenderTargetPixelsAsync(this.rtLoc, 0, 0, 64, 32, b).then(() => {
-            const v = chaveDe(b); this._chaveLoc = { v, t: performance.now() };
-            if ((this._reler || Math.abs((v[1] > 0 ? v[0] / v[1] : 0) - usado) > 0.1) && this.aoRefinar) setTimeout(() => this.aoRefinar && this.aoRefinar(), 120);
+            // a key read on an OLDER paint never overwrites the key of a newer paint (it landed after a jump read the new one)
+            const v = chaveDe(b); if (!this._chaveLoc || this._chaveLoc.seq <= seq) this._chaveLoc = { v, t: performance.now(), seq };
+            if ((this._reler || Math.abs((v[1] > 0 ? v[0] / v[1] : 0) - chaveUsada) > 0.1) && this.aoRefinar) setTimeout(() => this.aoRefinar && this.aoRefinar(), 120);
           }).catch(() => { this._chaveLoc = null; if (this._reler && this.aoRefinar) setTimeout(() => this.aoRefinar && this.aoRefinar(), 120); }).finally(() => { this._lendo = false; this._reler = false; });
         }
       } else {
         this.r.readRenderTargetPixels(this.rtLoc, 0, 0, 64, 32, this.bufLoc);
-        [sl, sw] = chaveDe(this.bufLoc); this._chaveLoc = { v: [sl, sw], t: performance.now() };
+        [sl, sw] = chaveDe(this.bufLoc); this._chaveLoc = { v: [sl, sw], t: performance.now(), seq };
       }
       U.lG.value = sw > 0 ? sl / sw : 0; U.tLoc.value = this.rtLoc.texture; U.sLoc.value = sDia * (0.4 + 0.6 * kDia);
       // day key on the GEOMETRIC mean (08/10): the arithmetic mean was ruled by small sun patches (porta-varanda 15h exposed
