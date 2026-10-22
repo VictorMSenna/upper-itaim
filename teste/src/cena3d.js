@@ -425,6 +425,9 @@ export function criarCena({ container, predio, unidades, teste = false,
   controls.touches.one = CameraControls.ACTION.TOUCH_ROTATE;
   controls.touches.two = CameraControls.ACTION.TOUCH_DOLLY;
   controls.touches.three = CameraControls.ACTION.NONE;
+  // 22/10 ITEM 11: &embutido=1 = the wheel without Ctrl never reaches camera-controls (it would preventDefault): the page scrolls;
+  // Ctrl+wheel (and a pinch) still zooms the model
+  if (/[?&]embutido=1/.test(location.search)) container.addEventListener('wheel', (e) => { if (!e.ctrlKey) e.stopPropagation(); }, { capture: true });
 
   const caixaPredio = new THREE.Box3(new THREE.Vector3(BX0, 0, BZ0), new THREE.Vector3(BX1, TOPO, BZ1));
   const ALVO = caixaPredio.getCenter(new THREE.Vector3());

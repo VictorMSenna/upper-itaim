@@ -13,6 +13,15 @@ import * as MET from './metricas.js'; // Card do Hugo (16/10): numbers of the bu
 import * as DICAS from './dicas.js'; // ENTRAR-NO-AP 21/10: first-visit tips (window tap, inside the 360)
 
 const params = new URLSearchParams(location.search);
+// 22/10 ITEM 11 (Sites: inside an iframe, 5 wheel turns = 0 px of page scroll on 1440, a 400 px swipe = 0 px on 393): &embutido=1
+// lets vertical swipes over the 3D model / 360 scroll the page (touch-action pan-y; camera-controls writes 'none' inline on its
+// canvas, hence !important); sideways drags still turn, pinch still zooms. The wheel: cena3d.js / tour360.js (Ctrl+wheel = zoom).
+if (params.get('embutido') === '1') {
+  document.documentElement.classList.add('embutido');
+  const st = document.createElement('style'); st.id = 'embutido-css';
+  st.textContent = 'html.embutido .cena,html.embutido .cena canvas,html.embutido .t360,html.embutido .t360-cv{touch-action:pan-y!important}';
+  document.head.appendChild(st);
+}
 const TESTE = params.has('teste');
 const REVISAO = params.has('revisao');
 const FORCAR_SEM_3D = params.has('semwebgl');

@@ -50,6 +50,10 @@ uniform float ymax[7];
 // <lamp>-lo.webp = low 4 bits x 17 (recodifica_luzes_12bits.py); v = hi*4080/4095 + lo*15/4095 is linear in both textures,
 // so bilinear filtering stays exact. loIdx[i] = which tL holds layer i's low bits (-1 = none). COM_LO needs 16 texture units.
 uniform float loIdx[7];
+// 22/10 ITEM 12: semRefl = 1 when the visitor switched the glass reflection OFF: the lamp layers (ehLuz) do not count inside the
+// window mask (tFora red): there they are the room reflected in the glass, baked in the render (porta-varanda at night)
+uniform float semRefl;
+uniform float ehLuz[7];
 #ifdef COM_LO
 uniform sampler2D tL0; uniform sampler2D tL1; uniform sampler2D tL2;
 #endif
@@ -177,7 +181,8 @@ vec3 neutral(vec3 c){
 }
 void main(){
   vec3 s = vec3(0.0);
-  ${[0, 1, 2, 3, 4, 5, 6].map((i) => `if (g[${i}].r + g[${i}].g + g[${i}].b > 0.0) { vec3 c${i} = texture2D(t[${i}], vUv).rgb; if (joelho[${i}] <= 0.0 && dbT > 0.0) c${i} = deband(t[${i}], vUv, c${i});\n#ifdef COM_LO\n  if (loIdx[${i}] > -0.5) { vec3 lo${i} = loIdx[${i}] < 0.5 ? texture2D(tL0, vUv).rgb : (loIdx[${i}] < 1.5 ? texture2D(tL1, vUv).rgb : texture2D(tL2, vUv).rgb); c${i} = c${i} * (4080.0 / 4095.0) + lo${i} * (15.0 / 4095.0); }\n#endif\n  s += g[${i}] * esc[${i}] * decod(c${i}, joelho[${i}], joelho2[${i}], y2[${i}], ymax[${i}], gamaL[${i}]); }`).join('\n  ')}
+  float foR = semRefl > 0.5 && usaFora > 0.5 ? texture2D(tFora, vUv).r : 0.0; // ITEM 12
+  ${[0, 1, 2, 3, 4, 5, 6].map((i) => `if (g[${i}].r + g[${i}].g + g[${i}].b > 0.0) { vec3 c${i} = texture2D(t[${i}], vUv).rgb; if (joelho[${i}] <= 0.0 && dbT > 0.0) c${i} = deband(t[${i}], vUv, c${i});\n#ifdef COM_LO\n  if (loIdx[${i}] > -0.5) { vec3 lo${i} = loIdx[${i}] < 0.5 ? texture2D(tL0, vUv).rgb : (loIdx[${i}] < 1.5 ? texture2D(tL1, vUv).rgb : texture2D(tL2, vUv).rgb); c${i} = c${i} * (4080.0 / 4095.0) + lo${i} * (15.0 / 4095.0); }\n#endif\n  s += g[${i}] * esc[${i}] * decod(c${i}, joelho[${i}], joelho2[${i}], y2[${i}], ymax[${i}], gamaL[${i}]) * (1.0 - ehLuz[${i}] * foR); }`).join('\n  ')}
   if (usaVis > 0.5) {
     vec3 alb = pow(texture2D(tAlb, vUv).rgb, vec3(2.2));
     vec3 n = normalize(texture2D(tNor, vUv).rgb * 2.0 - 1.0);
@@ -336,7 +341,7 @@ export class MisturaPonto {
       uniforms: { t: { value: Array(7).fill(PRETO) }, g: { value: Array.from({ length: 7 }, () => new THREE.Vector3()) },
         esc: { value: Array(7).fill(1) }, gama: { value: 2.2 }, ombro: { value: +(new URLSearchParams(location.search).get('ombro')) || 1.1 }, joelho: { value: Array(7).fill(0) }, joelho2: { value: Array(7).fill(0.95) }, gamaL: { value: Array(7).fill(2.2) }, y2: { value: Array(7).fill(2) }, ymax: { value: Array(7).fill(4) }, wb: { value: new THREE.Vector3(1, 1, 1) }, expo: { value: 1 }, srgb: { value: half ? 0 : 1 },
         tFora: { value: PRETO }, usaFora: { value: 0 }, pufeGanho: { value: +(new URLSearchParams(location.search).get('pufe')) || pufe.ganho || 0 }, pufeAmb: { value: Number.isFinite(parseFloat(new URLSearchParams(location.search).get('pufeA'))) ? parseFloat(new URLSearchParams(location.search).get('pufeA')) : (pufe.amb ?? 0) },
-        pufeAlb: { value: new THREE.Vector3(...(pufe.albedo || [0, 0, 0])) }, corLuz: { value: new THREE.Vector3(1, 1, 1) }, ambSala: { value: 0 }, pufeNoite: { value: 1 }, /* pufeAlb = sRGB (46, 50, 64) linear */ fatorFora: { value: 1 }, modoLum: { value: 0 }, tLoc: { value: PRETO }, sLoc: { value: 0 }, lG: { value: 0 }, dbR: { value: 14 / w }, loIdx: { value: Array(7).fill(-1) }, tL0: { value: PRETO }, tL1: { value: PRETO }, tL2: { value: PRETO }, dbT: { value: (new URLSearchParams(location.search).get('deband') === '0' ? 0 : 3) / 255 },
+        pufeAlb: { value: new THREE.Vector3(...(pufe.albedo || [0, 0, 0])) }, corLuz: { value: new THREE.Vector3(1, 1, 1) }, ambSala: { value: 0 }, pufeNoite: { value: 1 }, /* pufeAlb = sRGB (46, 50, 64) linear */ fatorFora: { value: 1 }, modoLum: { value: 0 }, tLoc: { value: PRETO }, sLoc: { value: 0 }, lG: { value: 0 }, dbR: { value: 14 / w }, loIdx: { value: Array(7).fill(-1) }, semRefl: { value: 0 }, ehLuz: { value: Array(7).fill(0) }, tL0: { value: PRETO }, tL1: { value: PRETO }, tL2: { value: PRETO }, dbT: { value: (new URLSearchParams(location.search).get('deband') === '0' ? 0 : 3) / 255 },
         veuFora: VEU.fora, veuTopo: VEU.topo, veuHoriz: VEU.horiz, tAlb: { value: PRETO }, tNor: { value: PRETO }, tVis: { value: PRETO }, tVis2: { value: PRETO }, nInt: { value: 0 }, usaVis: { value: 0 }, gDir: { value: new THREE.Vector3() },
         solDir: { value: new THREE.Vector3(0, 0, 1) }, tAc: { value: PRETO }, meioMin: { value: 0 }, visTam: { value: new THREE.Vector2(1, 1) }, raioVis: { value: Number.isFinite(parseFloat(new URLSearchParams(location.search).get('visr'))) ? parseFloat(new URLSearchParams(location.search).get('visr')) : (capacidade().nivel === 'topo' ? 2 : 1) }, pesoN: { value: new URLSearchParams(location.search).get('visn') === '0' ? 0 : 1 } }, // ?visr=0 = old look, ?visn=0 = no normal weight (tests)
     });
@@ -385,7 +390,7 @@ void main(){
   // writes what it used in `ultimo.estado` / `ultimo.veu`, so the caller can tell a stale picture from a current one.
   atualizar(estado) { return this._naFila(() => this._atualizar(estado)); }
   // the state a paint used, in the words the tour compares (season, minute, lamp set)
-  static estadoDe(estado, luzes) { return { estacao: estado.estacao, minutos: estado.minutos, luzes: Object.fromEntries(luzes.map((k) => [k, !!(estado.luzes && estado.luzes[k])])) }; }
+  static estadoDe(estado, luzes) { return { estacao: estado.estacao, minutos: estado.minutos, reflexo: estado.reflexo !== false, luzes: Object.fromEntries(luzes.map((k) => [k, !!(estado.luzes && estado.luzes[k])])) }; }
   // which layers + gains for a state; also returns the analytic mean (for exposure/white balance)
   // 15/10 S2 (audit S2-SOL-DENTRO): ONE render (unit 107, balcony to 343.4 deg) is shown for all 117 units. Direct sun
   // (solvis) and its bounce (solind) are kept only when (1) the unit's balcony faces the same way as the rendered one and
@@ -482,6 +487,7 @@ void main(){
     if (this.liberado) return null;
     if (txLo.some((t) => t === undefined)) Promise.all(loP).then(() => { if (this.aoRefinar) this.aoRefinar(); }).catch(() => {});
     const U = this.mat.uniforms;
+    U.semRefl.value = estado.reflexo === false ? 1 : 0; // ITEM 12
     U.usaVis.value = tDir && tDir.every(Boolean) ? 1 : 0;
     if (U.usaVis.value) {
       U.tAlb.value = tDir[0]; U.tNor.value = tDir[1]; U.tVis.value = tDir[2]; U.tVis2.value = tDir[3] || PRETO;
@@ -507,6 +513,7 @@ void main(){
       if (it && txLo[i]) { const k = U.loIdx.value.filter((x) => x >= 0).length; if (k < 3) { U['tL' + k].value = txLo[i]; U.loIdx.value[i] = k; } }
       U.g.value[i].set(...(it ? it.g : [0, 0, 0]));
       U.esc.value[i] = it ? it.c.escala : 1;
+      U.ehLuz.value[i] = it && it.luz ? 1 : 0; // ITEM 12
       U.joelho.value[i] = (it && it.c.joelho) || 0; U.joelho2.value[i] = (it && it.c.joelho2) || 0.95; U.y2.value[i] = (it && it.c.y2) || 2; U.ymax.value[i] = (it && it.c.ymax) || 4; U.gamaL.value[i] = (it && it.c.gama) || 2.2;
     }
     // partial grey-world white balance + exposure from the analytic mean (sum of layer means x gains)

@@ -472,6 +472,8 @@ export class VistaGoogle {
     const mg = 0.06, cl = (v) => Math.max(-1, Math.min(1, v));
     return { x0: cl(x0 - mg), y0: cl(y0 - mg), x1: cl(x1 + mg), y1: cl(y1 + mg) };
   }
+  // 22/10 ITEM 8: the outside view's ghost rules (building ghosts + tower screen box) never apply to the 360 window
+  _semFantasma() { const R = this.s.recorte; R.mapaR.value.w = 0; R.ret.value.set(1, 1, 0, 0); }
   // point the camera and draw the tiles into the target. dir = scene-frame direction; janela = NDC box to load tiles for
   // dirV (13/10, R3b): also draw the mirrored camera (balcony glass) into rtV in the same frame; its selection camera joins the
   // tiles' camera set so one update loads both views (no thrash between two updates per frame)
@@ -507,6 +509,7 @@ export class VistaGoogle {
     if (soCarregar) { const st = this.s.tiles.stats; if (st.queued + st.downloading + st.parsing > 0 || this.s.tiles.loadProgress < 1) this.acordar(); return; }
     const r = this.r, cc = r.getClearColor(new THREE.Color()), ca = r.getClearAlpha();
     const rtAnt = r.getRenderTarget();
+    this._semFantasma();
     r.setRenderTarget(this.rt); r.setClearColor(0x000000, 0); r.clear(); r.render(this.s.escena, this.cam);
     if (dirV && this.rtV) { r.setRenderTarget(this.rtV); r.clear(); r.render(this.s.escena, this.camV); }
     r.setRenderTarget(rtAnt); r.setClearColor(cc, ca);
@@ -609,6 +612,7 @@ export class VistaGoogle {
         r.setRenderTarget(rt); r.clear(); if (ms) r.render(this._copiaMS.cena, this._copiaMS.cam); else r.render(this.s.escena, cam);
         rt.scissorTest = false; rt.viewport.set(0, 0, lado, lado);
       };
+      this._semFantasma();
       R.luz.value.set(1, 1, 1); R.noite.value = 0; R.grade.value.set(1, 1, 1, 0.18); pinta(al.A, FOTO_LADO, C8.msaa > 0); // C7: A stays the raw photo city; the overlay grades it by the hour
       R.luz.value.set(0, 0, 0); R.noite.value = 1; pinta(al.W, FOTO_LADO_W);
       R.luz.value.copy(luz0); R.noite.value = noite0; R.grade.value.copy(grade0);
@@ -723,6 +727,7 @@ export class VistaGoogle {
     if (!((f.q >= 4 && agora - f.t0 > 300) || agora - f.t0 > 20000)) { this.acordar(); return; }
     const r = this.r, R = this.s.recorte, ant = r.getRenderTarget(), cc = r.getClearColor(new THREE.Color()), ca = r.getClearAlpha();
     const luz0 = R.luz.value.clone(), noite0 = R.noite.value, grade0 = R.grade.value.clone(), viz0 = R.vizN.value;
+    this._semFantasma();
     R.luz.value.set(1, 1, 1); R.noite.value = 0; R.grade.value.set(1, 1, 1, 0.18); R.vizN.value = 0; // Google's facade as it is (raw, neutral light)
     if (this._planosG) this._planosG.visible = false;
     this.s.escena.updateMatrixWorld(true);
@@ -1211,9 +1216,15 @@ export async function ligarGoogleCena({ scene, camera, renderer, ref, aoMudar, e
     // building ghosts (like our city): footprint map of our city's buildings + camera and tower positions (B5 = this frame)
     terreno(tex, ext) { s.recorte.terr.value = tex; s.recorte.terrExt.value = ext; },
     mapaPredios(tex, minX, minZ, tam) { s.recorte.mapa.value = tex; s.recorte.mapaR.value.set(minX, minZ, 1 / tam, 0); },
-    fantasma(cam, alvo) { if (!s.recorte.mapa.value) return; s.recorte.mapaR.value.w = cam ? 1 : 0; if (cam) { s.recorte.camB5.value.copy(cam); s.recorte.alvoB5.value.copy(alvo); } },
+    // 22/10 ITEM 8 (Victor: sky-coloured holes under the balcony railing in the 360): cena3d.js render() calls these two on every
+    // outside frame, also while the 360 window OWNS the tiles (its gCena.antes() returns early but the frame still renders on a
+    // sun change). The shared uniforms then carried the outside camera's ghost rules into the 360: Google's fragments inside the
+    // outside tower's screen box (drawing-buffer px) and nearer than its depth were dropped in the window view / window photo =
+    // holes of sky. Measured (buracos_varanda.mjs, P1's path: camera 200 m away, entry without animation): 274 885 hole px in
+    // 20 framings with the rules on, 0 with them off. Now they are written only by the owner of the tiles.
+    fantasma(cam, alvo) { if (s.dono !== api) return; if (!s.recorte.mapa.value) return; s.recorte.mapaR.value.w = cam ? 1 : 0; if (cam) { s.recorte.camB5.value.copy(cam); s.recorte.alvoB5.value.copy(alvo); } },
     // our tower's box on screen (drawing-buffer px, y up) + its nearest view depth; null = off
-    telaTorre(r, prof) { if (r) { s.recorte.ret.value.set(r[0], r[1], r[2], r[3]); s.recorte.prof.value = prof; } else s.recorte.ret.value.set(1, 1, 0, 0); },
+    telaTorre(r, prof) { if (s.dono !== api) return; if (r) { s.recorte.ret.value.set(r[0], r[1], r[2], r[3]); s.recorte.prof.value = prof; } else s.recorte.ret.value.set(1, 1, 0, 0); },
     // the shadow-overlay material drops the same fragments (no shadow painted on clipped / ghosted Google surfaces)
     aplicarRecorte(material) { material.onBeforeCompile = s.shaderRecorte; material.customProgramCacheKey = () => 'g3d-recorte-sombra'; material.needsUpdate = true; },
     // (kept for the API; Google now stays on at night with its own night light)

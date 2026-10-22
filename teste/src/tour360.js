@@ -33,7 +33,10 @@ export function fecharTour360() { atual?.fechar(true); }
 
 // 15/10 FILA C8: lamp names, the start point, the lamps lit at night and the night white reference come from the manifest
 // ("cena" block of assets/render/tour360/manifesto.json); CENA is set when a tour opens
-let CENA = { luzes: [], nomesLuz: {}, curtoLuz: {}, luzesNoite: [], inicio: null, refLuz: null, pufe: {} };
+let CENA = { luzes: [], nomesLuz: {}, curtoLuz: {}, luzesNoite: [], inicio: null, refLuz: null, pufe: {}, chegada: {} };
+// 22/10 ITEM 10/11 (Sites, module inside an iframe): &embutido=1 = the page scrolls with the wheel (no Ctrl) and with vertical
+// swipes; zoom only with Ctrl+wheel or a pinch; every point is reached facing its arrival view (manifest cena.chegada)
+const EMBUTIDO = typeof location !== 'undefined' && /[?&]embutido=1/.test(location.search);
 const paraMundo = ([u, v, h]) => new THREE.Vector3(-v, h, u);
 // D18c (Victor 16/10): until the client presses a lamp button, the lamps follow the hour: by day all off, at night only the
 // spots (night = sun below -2 deg, where the day/night blend of render-mix.js starts). His first press makes his set the
@@ -92,9 +95,14 @@ async function criar({ container, manifesto = 'assets/render/tour360/manifesto.j
   const bR = document.createElement('button'); bR.className = 't360-reflexo'; bR.hidden = true; bR.setAttribute('aria-pressed', 'true');
   bR.innerHTML = '<span class="l-longo">Reflexo no vidro</span><span class="l-curto">Reflexo</span>';
   raiz.querySelector('.t360-luzes').appendChild(bR);
-  bR.addEventListener('click', () => { estado.reflexo = estado.reflexo === false; bR.setAttribute('aria-pressed', String(estado.reflexo)); if (G && G.vidro) { G.malha.material.uniforms.usaVidro.value = estado.reflexo ? 1 : 0; G.vista.acordar(); } desenha(); });
-  function botaoReflexo() { bR.hidden = !(G && G.vidro); bR.setAttribute('aria-pressed', String(estado.reflexo !== false)); }
+  bR.addEventListener('click', () => { estado.reflexo = estado.reflexo === false; bR.setAttribute('aria-pressed', String(estado.reflexo)); if (G && G.vidro) { G.malha.material.uniforms.usaVidro.value = estado.reflexo ? 1 : 0; G.vista.acordar(); } desenha(); repinta(); }); // ITEM 12: + the lamps' reflection baked in the windows (render-mix semRefl)
+  // 22/10 ITEM 12 (Victor: 'sempre sem reflexo do vidro quando desligado'): the lamp layers of the render carry the room reflected
+  // in the window glass (porta-varanda at night, seen whenever Google's city is not over the window). The button now shows on every
+  // point with a window (or the balcony glass) and OFF removes both reflections: Google's city in the balcony glass and the lamps'
+  // reflection in the window pixels (render-mix.js semRefl).
+  function botaoReflexo() { const p = PTS[pontoVisivel()]; bR.hidden = !((G && G.vidro) || !!(p && p.camadas && p.camadas.fora)); bR.setAttribute('aria-pressed', String(estado.reflexo !== false)); }
   container.appendChild(raiz);
+  if (EMBUTIDO) raiz.style.touchAction = 'pan-y'; // ITEM 11: a vertical swipe scrolls the page, a sideways drag turns the 360, a pinch zooms
   { const b = raiz.querySelector('.t360-rot'); let tm = 0; b.addEventListener('click', (ev) => { ev.stopPropagation(); const ab = !b.classList.contains('aberto'); b.classList.toggle('aberto', ab); b.setAttribute('aria-expanded', String(ab)); clearTimeout(tm); if (ab) tm = setTimeout(() => { b.classList.remove('aberto'); b.setAttribute('aria-expanded', 'false'); }, 6000); }); }
   if (!document.getElementById('t360-css')) {
     const css = document.createElement('style'); css.id = 't360-css';
@@ -172,7 +180,7 @@ async function criar({ container, manifesto = 'assets/render/tour360/manifesto.j
     const u = e.mix.ultimo;
     if (!u || !u.estado || e.refinar) return false;
     const s = u.estado;
-    return s.estacao === estado.estacao && s.minutos === estado.minutos && u.veu === VEU.fora.value
+    return s.estacao === estado.estacao && s.minutos === estado.minutos && u.veu === VEU.fora.value && s.reflexo === (estado.reflexo !== false)
       && CENA.luzes.every((k) => !!s.luzes[k] === !!estado.luzes[k]);
   }
   async function pinta(id) {
@@ -181,6 +189,7 @@ async function criar({ container, manifesto = 'assets/render/tour360/manifesto.j
     const tx = await e.mix.atualizar(estado); // one paint at a time per point, state read when it starts (render-mix)
     if (fechado || !tx) return e;
     e.m.material.map = tx; e.m.material.needsUpdate = true;
+    if (id === pontoVisivel()) botaoReflexo();
     if (G && id === pontoVisivel()) G.aposPintar(id, e);
     return e;
   }
@@ -256,7 +265,7 @@ async function criar({ container, manifesto = 'assets/render/tour360/manifesto.j
     arr = null;
   };
   cv.addEventListener('pointerup', solta); cv.addEventListener('pointercancel', solta);
-  cv.addEventListener('wheel', (ev) => { ev.preventDefault(); fov = Math.max(35, Math.min(95, fov + ev.deltaY * 0.05)); aplicaCam(); desenha(); }, { passive: false });
+  cv.addEventListener('wheel', (ev) => { if (EMBUTIDO && !ev.ctrlKey) return; /* ITEM 11: the page scrolls; zoom = Ctrl+wheel or pinch */ ev.preventDefault(); fov = Math.max(35, Math.min(95, fov + ev.deltaY * 0.05)); aplicaCam(); desenha(); }, { passive: false });
 
   // ---------------------------------------------------------------- draw
   const elVista = raiz.querySelector('.t360-vista');
@@ -352,6 +361,10 @@ async function criar({ container, manifesto = 'assets/render/tour360/manifesto.j
   }
 
   // ---------------------------------------------------------------- walking between points
+  // ITEM 10 (22/10): arrival view per point, manifest cena.chegada = { <point>: [yaw, pitch, fov?] } (yaw 0 = balcony, + = right);
+  // only in embedded mode (&embutido=1) or with ?chegada=1 (tests). Before: the view direction was kept from point to point
+  // ('meio' opened looking at the ceiling and the glass).
+  function chegadaDe(id) { const c = (EMBUTIDO || /[?&]chegada=1/.test(location.search)) && CENA.chegada && CENA.chegada[id]; return Array.isArray(c) && c.length >= 2 ? c.map(Number) : null; }
   let andando = null;
   async function irPara(id, { dur = 600 } = {}) {
     if (!PTS[id] || id === estado.ponto || andando) return andando;
@@ -362,11 +375,14 @@ async function criar({ container, manifesto = 'assets/render/tour360/manifesto.j
       para.m.visible = true; para.m.material.opacity = 0; para.m.renderOrder = 1; de.m.renderOrder = 0;
       limpaHot();
       const p0 = paraMundo(PTS[estado.ponto].pos), p1 = paraMundo(PTS[id].pos);
+      const ch = chegadaDe(id), y0 = yaw, pi0 = pitch, f0 = fov; // ITEM 10
+      const dy = ch ? ((((ch[0] - y0) % 360) + 540) % 360) - 180 : 0; // shortest turn
       const t0 = performance.now();
       await new Promise((ok) => {
         const passo = (t) => {
           const k = Math.min(1, (t - t0) / dur), s = k * k * (3 - 2 * k);
           camera.position.lerpVectors(p0, p1, s);
+          if (ch) { yaw = y0 + dy * s; pitch = pi0 + (ch[1] - pi0) * s; if (ch[2]) fov = f0 + (ch[2] - f0) * s; }
           para.m.material.opacity = s; de.m.material.opacity = 1;
           aplicaCam(); desenha();
           if (k < 1) requestAnimationFrame(passo); else ok();
@@ -627,6 +643,7 @@ async function criar({ container, manifesto = 'assets/render/tour360/manifesto.j
   // ---------------------------------------------------------------- start
   camera.position.copy(paraMundo(PTS[estado.ponto].pos));
   if (volta && volta.ponto === estado.ponto) { yaw = +volta.yaw || 0; pitch = +volta.pitch || 0; fov = +volta.fov || fov; } // context-loss reload: same view
+  else { const ch = chegadaDe(estado.ponto); if (ch) { yaw = ch[0]; pitch = ch[1]; if (ch[2]) fov = ch[2]; } } // ITEM 10: first view of the visit
   raiz.querySelector('.t360-nome').textContent = PTS[estado.ponto].nome;
   aplicaCam(); redim(); marcaLuzes();
   // 21/10 SACADA-GOOGLE-JA: from the very first frame the window waits for Google's city with the haze of the hour (no swap of
