@@ -1,20 +1,40 @@
 {
- "_leia": "E0 21/10 (prototipo, so a demo): vista da janela GERADA, 1 imagem por face, fundo distante (cilindro raio_m + chao) visto da posicao real de cada ponto do 360. Gerada por SD 1.5 + ControlNet depth guiada so pela geometria LiDAR (GeoSampa CC BY-SA 4.0), nunca por pixel do Google. Imagem ilustrativa, nao e a vista real.",
+ "_leia": "E0 22/10 v2 (prototipo, so a demo): vista da janela = 1 imagem por face, fundo distante (cilindro raio_m + chao) visto da posicao real de cada ponto do 360. v2: FOTO REAL do drone do Hugo (DJI 4K, abr/2026, voos 0198/0199 olhando para o norte), costurada (OpenCV) e posta na faixa lon/lat da face N; nenhum pixel do Google, nenhuma IA na cidade. Nao e a vista real da unidade: imagem ilustrativa.",
  "credito": "Vista da janela: imagem ilustrativa",
- "padrao": { "final": 7, "andar": 10 },
+ "padrao": {
+  "final": 7,
+  "andar": 10
+ },
  "faces": {
   "N": {
-   "finais": [3, 5, 7],
+   "finais": [
+    3,
+    5,
+    7
+   ],
    "ponto_ref": "varanda",
    "base": "norte-base.webp",
    "noite": "norte-noite.webp",
-   "lon": [-110, 110],
-   "lat": [-75, 60],
+   "lon": [
+    -76,
+    84
+   ],
+   "lat": [
+    -72,
+    40
+   ],
    "raio_m": 350,
-   "chao_m": -30.33,
-   "andar_geracao": 7,
+   "chao_m": -100,
+   "andar_geracao": 10,
    "piso_m": 2.81,
-   "desloc_final": { "3": -10.505, "5": -5.325, "7": 0 }
+   "desloc_final": {
+    "3": -10.505,
+    "5": -5.325,
+    "7": 0
+   },
+   "fonte": "drone-base2 (monta_base_drone2.py) + camadas_foto.py",
+   "ceu_foto": true,
+   "alfa_meio": true
   }
  }
 }

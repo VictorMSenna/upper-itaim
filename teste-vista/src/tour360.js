@@ -5,11 +5,19 @@ import { SOL } from "./dados-sol.js";
 import { MisturaPonto, ROTULO, INFO, VEU } from "./render-mix.js";
 import { solNoInstante } from "./interior-sol.js";
 import { criarVistaGerada } from "./vista-gerada.js"; // E0 21/10: generated window view (prototype)
-let atual = null;
+let atual = null, geracao = 0;
 async function abrirTour360(opts) {
+  const g = ++geracao;
   if (atual) atual.fechar(false);
-  atual = await criar(opts);
-  return atual.api;
+  const h = await criar({ ...opts, registrar: (x) => {
+    if (g !== geracao) {
+      x.fechar(false);
+      return;
+    }
+    if (atual && atual !== x) atual.fechar(false);
+    atual = x;
+  } });
+  return h.api;
 }
 function definirHora(m) {
   atual?.api.definirHora(m);
@@ -57,6 +65,15 @@ function luzesAuto(estacao, minutos) {
   }
   return Object.fromEntries(CENA.luzes.map((k) => [k, el < -2 && CENA.luzesNoite.includes(k)]));
 }
+const CHAVE_RETORNO = chaveLocal("tabela3d-360-retorno");
+function retorno360(numero) {
+  try {
+    const o = JSON.parse(sessionStorage.getItem(CHAVE_RETORNO) || "null");
+    if (o && String(o.numero) === String(numero) && Date.now() - o.t < 12e4) return o;
+  } catch (e) {
+  }
+  return null;
+}
 async function criar({
   container,
   manifesto = "assets/render/tour360/manifesto.json",
@@ -69,7 +86,8 @@ async function criar({
   andar = null,
   final = null,
   numero = null,
-  torre = null
+  torre = null,
+  registrar = null
 }) {
   const man = typeof manifesto === "string" ? await (await fetch(manifesto)).json() : manifesto;
   const base = typeof manifesto === "string" ? manifesto.replace(/[^/]*$/, "") : man.base || "";
@@ -80,6 +98,14 @@ async function criar({
     return c ? c.media_dentro || c.media : null;
   })();
   const pontoInicial = () => (man.pontos.find((p) => p.id === CENA.inicio && p.camadas && p.camadas.fora) || man.pontos.find((p) => p.camadas && p.camadas.fora) || man.pontos[0]).id;
+  const volta = numero != null ? retorno360(numero) : null;
+  if (volta) {
+    try {
+      sessionStorage.removeItem(CHAVE_RETORNO);
+    } catch (e) {
+    }
+    if (!ponto && PTS[volta.ponto]) ponto = volta.ponto;
+  }
   const estado = { estacao, minutos, luzes: { ...luzesDoCliente() || luzes || luzesAuto(estacao, minutos) }, ponto: ponto && PTS[ponto] ? ponto : pontoInicial() };
   let G = null;
   let VG = null; // E0 21/10: generated window view
@@ -167,7 +193,13 @@ async function criar({
   const renderer = new THREE.WebGLRenderer({ canvas: cv, antialias: true, preserveDrawingBuffer: teste });
   cv.addEventListener("webglcontextlost", (ev) => {
     ev.preventDefault();
-    if (rebaixar()) setTimeout(() => location.reload(), 300);
+    if (rebaixar()) {
+      guardaRetorno();
+      setTimeout(() => location.reload(), 300);
+    }
+  });
+  cv.addEventListener("webglcontextrestored", () => {
+    if (!fechado) recuperaContexto();
   });
   renderer.setPixelRatio(Math.min(capacidade().dprMax, window.devicePixelRatio || 1));
   renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -193,7 +225,7 @@ async function criar({
     mix.pufeNoiteCena = CENA.pufe && CENA.pufe.noite;
     mix.aoRefinar = () => {
       if (fechado) return;
-      if (estado.ponto === id) repinta();
+      if (pontoVisivel() === id) repinta();
       else e.refinar = true;
     };
     mix.refLuz = REF_LUZ;
@@ -201,17 +233,26 @@ async function criar({
     esferas.set(id, e);
     return e;
   }
+  let destino = null;
+  const pontoVisivel = () => destino || estado.ponto;
+  function emDia(e) {
+    const u = e.mix.ultimo;
+    if (!u || !u.estado || e.refinar) return false;
+    const s = u.estado;
+    return s.estacao === estado.estacao && s.minutos === estado.minutos && u.veu === VEU.fora.value && CENA.luzes.every((k) => !!s.luzes[k] === !!estado.luzes[k]);
+  }
   async function pinta(id) {
     const e = esfera(id);
     e.refinar = false;
     const tx = await e.mix.atualizar(estado);
+    if (fechado || !tx) return e;
     e.m.material.map = tx;
     e.m.material.needsUpdate = true;
-    if (VG) {
+    if (VG && id === pontoVisivel()) {
       VG.aposPintar(id, e);
       if (G && VG.cobre(id)) { G.vidro = false; botaoReflexo(); }
     }
-    if (G) G.aposPintar(id, e);
+    if (G && id === pontoVisivel()) G.aposPintar(id, e);
     return e;
   }
   const grupoHot = new THREE.Group();
@@ -233,8 +274,15 @@ async function criar({
     t.colorSpace = THREE.SRGBColorSpace;
     return t;
   })();
-  function montaHot() {
+  function limpaHot() {
+    for (const m of grupoHot.children) {
+      m.geometry.dispose();
+      m.material.dispose();
+    }
     grupoHot.clear();
+  }
+  function montaHot() {
+    limpaHot();
     const p = PTS[estado.ponto];
     for (const vid of p.vizinhos || []) {
       const q = PTS[vid];
@@ -450,13 +498,15 @@ async function criar({
   let andando = null;
   async function irPara2(id, { dur = 600 } = {}) {
     if (!PTS[id] || id === estado.ponto || andando) return andando;
+    destino = id;
     andando = (async () => {
       const de = esfera(estado.ponto), para = await pinta(id);
+      if (fechado) return;
       para.m.visible = true;
       para.m.material.opacity = 0;
       para.m.renderOrder = 1;
       de.m.renderOrder = 0;
-      grupoHot.clear();
+      limpaHot();
       const p0 = paraMundo(PTS[estado.ponto].pos), p1 = paraMundo(PTS[id].pos);
       const t0 = performance.now();
       await new Promise((ok) => {
@@ -472,36 +522,76 @@ async function criar({
         };
         requestAnimationFrame(passo);
       });
+      if (fechado) return;
       de.m.visible = false;
       para.m.material.opacity = 1;
-      de.mix.soltarCamadas();
       estado.ponto = id;
+      destino = null;
       raiz.querySelector(".t360-nome").textContent = PTS[id].nome;
+      if (de !== para) de.mix.soltarCamadas();
       andando = null;
       montaHot();
       desenha();
-      if (para.refinar) repinta();
+      if (!emDia(para)) repinta();
+      else avisoSol(para);
     })();
+    const esta = andando;
+    esta.catch((err) => console.warn("tour360: caminhada falhou", err && err.message)).finally(() => {
+      if (andando === esta) andando = null;
+      if (destino === id) destino = null;
+    });
     return andando;
   }
   let pintando = null, pendente = false;
   async function repinta() {
+    if (fechado) return null;
     if (pintando) {
       pendente = true;
       return pintando;
     }
     pintando = (async () => {
-      do {
+      let semPedido = 0;
+      while (!fechado) {
         pendente = false;
-        const e = await pinta(estado.ponto);
-        e.m.visible = true;
-        avisoSol(e);
+        const alvo = pontoVisivel();
+        const e = await pinta(alvo);
+        if (fechado) break;
+        if (alvo === estado.ponto && !andando) {
+          e.m.visible = true;
+          avisoSol(e);
+        }
         desenha();
-      } while (pendente);
+        if (pendente) continue;
+        if (emDia(esfera(pontoVisivel()))) break;
+        if (++semPedido >= 3) break;
+      }
     })().finally(() => {
       pintando = null;
     });
     return pintando;
+  }
+  function guardaRetorno() {
+    if (numero == null) return;
+    try {
+      sessionStorage.setItem(CHAVE_RETORNO, JSON.stringify({ numero: String(numero), estacao: estado.estacao, minutos: estado.minutos, ponto: estado.ponto, yaw, pitch, fov, t: Date.now() }));
+    } catch (e) {
+    }
+  }
+  function recuperaContexto() {
+    if (G) {
+      try {
+        G.liberar();
+      } catch (e) {
+      }
+      G = null;
+      window.__g3dVista = null;
+    }
+    VEU.fora.value = 0;
+    for (const e of esferas.values()) {
+      e.mix.esquecerCamadas();
+      e.refinar = true;
+    }
+    repinta();
   }
   function avisoSol(e) {
     const a = raiz.querySelector(".t360-aviso-sol");
@@ -853,33 +943,6 @@ async function criar({
       if (!fechado) repinta();
     }
   }
-  camera.position.copy(paraMundo(PTS[estado.ponto].pos));
-  raiz.querySelector(".t360-nome").textContent = PTS[estado.ponto].nome;
-  aplicaCam();
-  redim();
-  marcaLuzes();
-  VEU.fora.value = /[?&]google3d=0/.test(location.search) ? 0 : 1;
-  VG = /[?&]vistagerada=0/.test(location.search) ? null : await criarVistaGerada({ cena, PTS, andar, final, RAIO });
-  if (VG) raiz.appendChild(VG.credito);
-  await repinta();
-  montaHot();
-  desenha();
-  await ligaGoogle();
-  raiz.dataset.ready = "1";
-  if (/[?&]debug360=1/.test(location.search)) {
-    const d = document.createElement("pre");
-    d.style.cssText = "position:absolute;left:8px;top:240px;z-index:50;margin:0;padding:6px 8px;font:11px/1.35 monospace;background:rgba(0,0,0,.75);color:#fff;border-radius:6px;pointer-events:none;white-space:pre-wrap;max-width:80%";
-    const atualizaDbg = () => {
-      d.textContent = `WebGL ${INFO.webgl} · RT float: ${INFO.rtFloat ? "sim" : "NAO (8 bits, sRGB)"}
-maxTextureSize ${INFO.maxTex} · larguraMax ${larguraMax}
-texturas enviadas: ${[...INFO.tamanhos].join(", ")}
-decodificador: ${INFO.decodificador} · dpr ${renderer.getPixelRatio()}
-${navigator.userAgent.slice(0, 120)}`;
-    };
-    atualizaDbg();
-    setInterval(atualizaDbg, 2e3);
-    raiz.appendChild(d);
-  }
   const api = {
     definirHora: (m) => {
       estado.minutos = m;
@@ -913,11 +976,62 @@ ${navigator.userAgent.slice(0, 120)}`;
     },
     cursor: () => cv.className,
     chips: () => chipsAtuais.slice(),
-    estado: () => ({ ...estado, luzes: { ...estado.luzes }, yaw, pitch, fov, expo: esfera(estado.ponto).mix.ultimo?.expo, lG: esfera(estado.ponto).mix.ultimo?.lG, google: G ? { ...window.__g3d || {}, ms: G.perf.n ? G.perf.ms / G.perf.n : 0, max: G.perf.max, n: G.perf.n } : null }),
+    estado: () => {
+      const e = esfera(estado.ponto), u = e.mix.ultimo;
+      return {
+        ...estado,
+        luzes: { ...estado.luzes },
+        yaw,
+        pitch,
+        fov,
+        expo: u?.expo,
+        lG: u?.lG,
+        andando: !!andando,
+        pintado: u && u.estado ? { ...u.estado, luzes: { ...u.estado.luzes }, veu: u.veu, el: u.sol && Number.isFinite(u.sol.el) ? +u.sol.el.toFixed(2) : null } : null,
+        emDia: emDia(e),
+        google: G ? { ...window.__g3d || {}, ms: G.perf.n ? G.perf.ms / G.perf.n : 0, max: G.perf.max, n: G.perf.n } : null
+      };
+    },
     fechar: () => fechar(true),
     renderer
   };
-  return { api, fechar, raiz };
+  const alca = { api, fechar, raiz };
+  if (registrar) registrar(alca);
+  camera.position.copy(paraMundo(PTS[estado.ponto].pos));
+  if (volta && volta.ponto === estado.ponto) {
+    yaw = +volta.yaw || 0;
+    pitch = +volta.pitch || 0;
+    fov = +volta.fov || fov;
+  }
+  raiz.querySelector(".t360-nome").textContent = PTS[estado.ponto].nome;
+  aplicaCam();
+  redim();
+  marcaLuzes();
+  VEU.fora.value = /[?&]google3d=0/.test(location.search) ? 0 : 1;
+  VG = /[?&]vistagerada=0/.test(location.search) ? null : await criarVistaGerada({ cena, PTS, andar, final, RAIO });
+  if (VG) raiz.appendChild(VG.credito);
+  await repinta();
+  if (fechado) return alca;
+  montaHot();
+  desenha();
+  await ligaGoogle();
+  if (fechado) return alca;
+  raiz.dataset.ready = "1";
+  if (/[?&]debug360=1/.test(location.search)) {
+    const d = document.createElement("pre");
+    d.style.cssText = "position:absolute;left:8px;top:240px;z-index:50;margin:0;padding:6px 8px;font:11px/1.35 monospace;background:rgba(0,0,0,.75);color:#fff;border-radius:6px;pointer-events:none;white-space:pre-wrap;max-width:80%";
+    const atualizaDbg = () => {
+      d.textContent = `WebGL ${INFO.webgl} · RT float: ${INFO.rtFloat ? "sim" : "NAO (8 bits, sRGB)"}
+maxTextureSize ${INFO.maxTex} · larguraMax ${larguraMax}
+texturas enviadas: ${[...INFO.tamanhos].join(", ")}
+decodificador: ${INFO.decodificador} · dpr ${renderer.getPixelRatio()}
+${navigator.userAgent.slice(0, 120)}`;
+    };
+    atualizaDbg();
+    setInterval(atualizaDbg, 2e3);
+    raiz.appendChild(d);
+  }
+  return alca;
 }
 export {
   abrirTour360,
@@ -926,5 +1040,6 @@ export {
   definirLuz,
   estadoTour360,
   fecharTour360,
-  irPara
+  irPara,
+  retorno360
 };

@@ -5,7 +5,7 @@ aplicarCoresCss();
 import { CONFIG } from "./config.js";
 import { META, UNIDADES, PREDIO } from "./dados.js";
 import { brl, brlCurto, m2, dataBR, STATUS, POSICAO, PLANTA, el, texto } from "./util.js";
-import { PREDIO_CFG } from "./predio.js";
+import { PREDIO_CFG, chaveLocal } from "./predio.js";
 import { abrirTour } from "./tour.js";
 import * as MET from "./metricas.js";
 import * as DICAS from "./dicas.js";
@@ -904,6 +904,13 @@ async function entrarApartamento(id, { semAnimacao = false } = {}) {
       },
       aoFechar: () => pedirSaida("modulo")
     });
+    {
+      const j = S.rel.info();
+      if (j.est !== i.est || j.t !== i.t) {
+        M.definirEstacao?.(j.est);
+        M.definirHora?.(j.t);
+      }
+    }
     espelharEstadoInterior(S.ctl);
     legendaVistaInterior();
     const v = vistaInterior.get(id);
@@ -1331,6 +1338,15 @@ function deepLink() {
   if (m[2]) {
     try {
       history.replaceState(null, "", `#u${u.numero}`);
+    } catch (e) {
+    }
+    try {
+      const o = JSON.parse(sessionStorage.getItem(chaveLocal("tabela3d-360-retorno")) || "null");
+      if (o && String(o.numero) === String(u.numero) && Date.now() - o.t < 120e3) carregarSol().then((S) => {
+        S.rel.estacao(o.estacao);
+        S.rel.hora(o.minutos);
+      }).catch(() => {
+      });
     } catch (e) {
     }
     entrarApartamento(u.id, { semAnimacao: true });

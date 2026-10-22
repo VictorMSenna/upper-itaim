@@ -438,8 +438,28 @@ void main(){
     return v;
   }
   soltarCamadas() {
-    for (const p of this.cache.values()) p.then((t) => t && t.dispose());
-    this.cache.clear();
+    return this._naFila(() => {
+      for (const p of this.cache.values()) p.then((t) => t && t.dispose());
+      this.cache.clear();
+    });
+  }
+  esquecerCamadas() {
+    return this._naFila(() => {
+      this.cache.clear();
+      this._chaveLoc = null;
+    });
+  }
+  _naFila(fn) {
+    const vez = (this._fila || Promise.resolve()).then(fn);
+    this._fila = vez.catch(() => {
+    });
+    return vez;
+  }
+  atualizar(estado) {
+    return this._naFila(() => this._atualizar(estado));
+  }
+  static estadoDe(estado, luzes) {
+    return { estacao: estado.estacao, minutos: estado.minutos, luzes: Object.fromEntries(luzes.map((k) => [k, !!(estado.luzes && estado.luzes[k])])) };
   }
   fatorSolUnidade(estacao, minutos) {
     const u = this.unidade, S = this.SOL;
@@ -521,7 +541,9 @@ void main(){
     if (dir && dir.media) for (let i = 0; i < 3; i++) media[i] += dir.g[i] * dir.media[i];
     return { lista: lista.slice(0, 7), media, mDentro, mFora, mDia, sol: s, dir, minutos, fSol };
   }
-  async atualizar(estado) {
+  async _atualizar(estado) {
+    if (this.liberado) return null;
+    const usado = MisturaPonto.estadoDe(estado, this.luzesOrdem);
     const pl = this.plano(estado);
     this.emUso = new Set(pl.lista.map((it) => it.c.arq));
     const C = this.p.camadas;
@@ -532,6 +554,7 @@ void main(){
     const loP = pl.lista.map((it) => it.c.lo && this.comLo ? this.textura(it.c.lo, false, true) : null);
     const tx = await Promise.all(pl.lista.map((it) => this.textura(it.c.arq, false, !!it.c.joelho)));
     const txLo = await Promise.all(loP.map((p) => p ? Promise.race([p, Promise.resolve(void 0)]) : null));
+    if (this.liberado) return null;
     if (txLo.some((t) => t === void 0)) Promise.all(loP).then(() => {
       if (this.aoRefinar) this.aoRefinar();
     }).catch(() => {
@@ -627,6 +650,7 @@ void main(){
     const eDia = Math.min(yD > 0 ? yDia > yD ? AD / Math.sqrt(yD * yDia) : AD / yD : 1, +new URLSearchParams(location.search).get("etop") || 1.6);
     U.expo.value = Math.min(eNoite + (eDia - eNoite) * kDia, 8);
     const tFora = C.fora ? await this.textura(C.fora.arq) : null;
+    if (this.liberado) return null;
     if (tFora) this.emUso.add(C.fora.arq);
     U.usaFora.value = tFora ? 1 : 0;
     if (!tFora) U.tFora.value = PRETO;
@@ -673,25 +697,34 @@ void main(){
         return [sl2, sw2];
       };
       let sl, sw;
-      if (this._chaveLoc && performance.now() - this._chaveLoc.t < 1500 && this.r.readRenderTargetPixelsAsync) {
+      const ant = this._anterior;
+      this._anterior = usado;
+      const seq = this._seq = (this._seq || 0) + 1;
+      const dMin = ant ? Math.abs(ant.minutos - usado.minutos) : 1e9, passo = Math.min(dMin, 1440 - dMin);
+      const continuo = !!ant && ant.estacao === usado.estacao && JSON.stringify(ant.luzes) === JSON.stringify(usado.luzes) && passo <= 60;
+      if (this._chaveLoc && performance.now() - this._chaveLoc.t < 1500 && continuo && this.r.readRenderTargetPixelsAsync) {
         [sl, sw] = this._chaveLoc.v;
-        if (!this._lendo) {
+        if (this._lendo) this._reler = true;
+        else {
           this._lendo = true;
-          const b = new Uint8Array(64 * 32 * 4), usado = sw > 0 ? sl / sw : 0;
+          this._reler = false;
+          const b = new Uint8Array(64 * 32 * 4), chaveUsada = sw > 0 ? sl / sw : 0;
           this.r.readRenderTargetPixelsAsync(this.rtLoc, 0, 0, 64, 32, b).then(() => {
             const v = chaveDe(b);
-            this._chaveLoc = { v, t: performance.now() };
-            if (Math.abs((v[1] > 0 ? v[0] / v[1] : 0) - usado) > 0.1 && this.aoRefinar) setTimeout(() => this.aoRefinar && this.aoRefinar(), 120);
+            if (!this._chaveLoc || this._chaveLoc.seq <= seq) this._chaveLoc = { v, t: performance.now(), seq };
+            if ((this._reler || Math.abs((v[1] > 0 ? v[0] / v[1] : 0) - chaveUsada) > 0.1) && this.aoRefinar) setTimeout(() => this.aoRefinar && this.aoRefinar(), 120);
           }).catch(() => {
             this._chaveLoc = null;
+            if (this._reler && this.aoRefinar) setTimeout(() => this.aoRefinar && this.aoRefinar(), 120);
           }).finally(() => {
             this._lendo = false;
+            this._reler = false;
           });
         }
       } else {
         this.r.readRenderTargetPixels(this.rtLoc, 0, 0, 64, 32, this.bufLoc);
         [sl, sw] = chaveDe(this.bufLoc);
-        this._chaveLoc = { v: [sl, sw], t: performance.now() };
+        this._chaveLoc = { v: [sl, sw], t: performance.now(), seq };
       }
       U.lG.value = sw > 0 ? sl / sw : 0;
       U.tLoc.value = this.rtLoc.texture;
@@ -702,10 +735,11 @@ void main(){
     this.r.setRenderTarget(this.rt);
     this.r.render(this.cena, this.cam);
     this.r.setRenderTarget(null);
-    this.ultimo = { ...pl, expo: K * U.expo.value, lG: U.lG.value + Math.log2(U.expo.value) };
+    this.ultimo = { ...pl, expo: K * U.expo.value, lG: U.lG.value + Math.log2(U.expo.value), estado: usado, veu: U.veuFora.value };
     return this.rt.texture;
   }
   liberar() {
+    this.liberado = true;
     this.rt.dispose();
     this.mat.dispose();
     this.rtLum.dispose();

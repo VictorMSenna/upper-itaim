@@ -25,12 +25,15 @@ uniform vec4 faixa;        // lon0, lon1, lat0, lat1 (radians) of the image
 uniform vec3 tinta;        // colour filter of the hour
 uniform float expo;        // exposure of the hour
 uniform float sat;         // saturation of the hour
+uniform float contraste;   // contrast around mid grey (golden hour / dusk)
 uniform float kNoite;      // weight of the night emission
 uniform float escuro;      // how much the day photo is darkened at night (0 = day)
 uniform vec3 ceuTopo;
 uniform vec3 ceuHoriz;
 uniform vec3 nevoa;        // haze colour of the hour (low sun / dusk)
 uniform float forca;
+uniform float alfaMeio;
+uniform float kCeuFoto;    // v2: the drone's own cloudy sky by day (faded above 18-28 deg, where the stitch ends)
 vec3 lin(vec3 c){ return pow(max(c, vec3(0.0)), vec3(2.2)); }
 vec3 paraSrgb(vec3 c){ c = max(c, vec3(0.0)); return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c)); }
 void main(){
@@ -52,11 +55,16 @@ void main(){
   vec3 cor = ceu;
   if (uv.x > 0.0 && uv.x < 1.0 && uv.y > 0.0 && uv.y < 1.0) {
     vec4 B = texture2D(tBase, uv);
+    B.a = alfaMeio > 0.5 ? clamp((B.a - 0.5) * 2.0, 0.0, 1.0) : B.a;   // v2 layers: sky stored at alpha 0.5
     vec3 x = lin(B.rgb) * tinta * expo;
     float l = dot(x, vec3(0.2126, 0.7152, 0.0722));
     x = mix(vec3(l), x, sat);
+    x = 0.18 * pow(max(x, vec3(0.0)) / 0.18, vec3(contraste));
     x = x * (1.0 - escuro) + lin(texture2D(tNoite, uv).rgb) * kNoite;
-    cor = mix(ceu, x, B.a);
+    vec3 cf = lin(B.rgb) * mix(vec3(1.0), tinta, 0.6) * expo;
+    float wf = kCeuFoto * smoothstep(0.36, 0.21, lat);   // fade the real sky out between 21 and 12 deg (the stitch border lies above)
+    vec3 ceuF = mix(ceu, cf, wf);
+    cor = mix(ceuF, x, B.a);
   }
   float aw = m * forca;
   gl_FragColor = vec4(paraSrgb(cor) * aw, aw);             // premultiplied (blend ONE, ONE_MINUS_SRC_ALPHA)
@@ -65,26 +73,35 @@ void main(){
 const suave = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 const mistura = (p, q, t) => p.map((v, i) => v + (q[i] - v) * t);
 
-// colour state of the hour from the sun elevation (el, degrees) and the clock (afternoon = warmer)
+// colour state of the hour from the sun elevation (el, degrees) and the clock. v2 (22/10, coordinator: "12h e 17h quase iguais"):
+// a strong, obvious grade per moment - morning cool and clean, noon neutral, 17h warm gold with contrast, 18h30 pink/blue dusk,
+// 21h dark blue night - blended continuously (each weight is a smoothstep of the elevation).
 function filtroDaHora(el, minutos) {
-  const tarde = minutos >= 12 * 60 ? 1 : 0.55;
-  const dia = suave(-6, 8, el);                        // 0 night .. 1 day
-  const baixo = suave(28, 6, el) * suave(-4, 2, el);   // low sun: golden light
-  const crep = suave(-9, -1, el) * (1 - suave(0, 5, el)); // dusk / blue hour
-  let tinta = [1, 1, 1];
-  tinta = mistura(tinta, [1.16, 0.98, 0.80], baixo * tarde);
-  tinta = mistura(tinta, [0.70, 0.74, 1.0], crep);
-  const expo = (0.06 + 0.94 * suave(-9, 6, el)) * (1 - 0.12 * baixo);
-  const sat = 1.0 + 0.10 * baixo * tarde - 0.35 * crep;
-  const kNoite = 1 - suave(-7, -1.5, el);
-  const escuro = (1 - suave(-12, 4, el)) * 0.86;   // night: the masses of the buildings stay faintly visible (blue)
-  // sky: day blue, golden horizon at low sun, dusk violet, night navy (same family as google-vista ceuParaSol)
-  let topo = mistura([0.008, 0.012, 0.03], [0.16, 0.33, 0.68], dia), horiz = mistura([0.02, 0.025, 0.05], [0.62, 0.72, 0.84], dia);
-  topo = mistura(topo, [0.22, 0.30, 0.58], baixo * 0.5);
-  horiz = mistura(horiz, [1.0, 0.70, 0.42], baixo * tarde * 0.75);
-  topo = mistura(topo, [0.10, 0.12, 0.30], crep * 0.6);
-  horiz = mistura(horiz, [0.85, 0.52, 0.48], crep * 0.6);
-  return { tinta, expo, sat, kNoite, escuro, topo, horiz, nevoa: horiz };
+  const tarde = minutos >= 12 * 60 ? 1 : 0;
+  const manha = (1 - tarde) * suave(4, 30, el) * (1 - suave(45, 70, el));      // morning, sun up but not high
+  const ouro = tarde * suave(32, 12, el) * suave(-2, 4, el);                  // afternoon golden hour
+  const ouroM = (1 - tarde) * suave(16, 4, el) * suave(-2, 3, el) * 0.5;      // a softer gold at sunrise
+  const crep = suave(-13, -3, el) * (1 - suave(-1.5, 3, el));                 // dusk: pink horizon, blue sky
+  const noite = 1 - suave(-16, -7, el);
+  let tinta = [1.0, 1.0, 1.0];
+  tinta = mistura(tinta, [0.84, 0.95, 1.16], manha);
+  tinta = mistura(tinta, [1.30, 0.98, 0.64], Math.max(ouro, ouroM));
+  tinta = mistura(tinta, [0.82, 0.62, 0.92], crep);
+  tinta = mistura(tinta, [0.42, 0.52, 0.95], noite);
+  let expo = (1.0 + 0.08 * suave(50, 70, el)) * (1 + 0.06 * manha);
+  expo *= 1 - 0.08 * ouro;
+  expo *= 1 - 0.62 * crep;
+  expo = expo * (1 - noite) + 0.10 * noite;
+  const contraste = 1 + 0.30 * ouro + 0.14 * manha + 0.12 * crep;
+  const sat = (1.05 + 0.30 * ouro - 0.08 * manha) * (1 - 0.25 * crep) * (1 - 0.35 * noite);
+  const kNoite = Math.max(1 - suave(-12, -2, el), 0) * (0.55 + 0.45 * suave(-6, -14, el));   // 18h30 partly lit, 21h all
+  let topo = [0.20, 0.40, 0.80], horiz = [0.66, 0.78, 0.92];
+  topo = mistura(topo, [0.26, 0.48, 0.88], manha); horiz = mistura(horiz, [0.80, 0.88, 0.98], manha);
+  topo = mistura(topo, [0.28, 0.40, 0.68], Math.max(ouro, ouroM)); horiz = mistura(horiz, [1.0, 0.70, 0.40], Math.max(ouro, ouroM));
+  topo = mistura(topo, [0.10, 0.14, 0.40], crep); horiz = mistura(horiz, [0.98, 0.56, 0.58], crep);
+  topo = mistura(topo, [0.006, 0.012, 0.045], noite); horiz = mistura(horiz, [0.035, 0.05, 0.13], noite);
+  const kCeuFoto = suave(2, 14, el) * (1 - 0.5 * ouro);   // real clouds by day, the gradient takes over at golden hour/dusk/night
+  return { kCeuFoto, tinta, expo, sat, contraste, kNoite, escuro: 0, topo, horiz, nevoa: horiz, pesos: { manha, ouro, crep, noite } };
 }
 
 async function criarVistaGerada({ cena, PTS, andar, final, RAIO, base = "assets/vista-gerada/" }) {
@@ -106,8 +123,8 @@ async function criarVistaGerada({ cena, PTS, andar, final, RAIO, base = "assets/
     tM: { value: preto }, tBase: { value: tBase }, tNoite: { value: tNoite || preto },
     O: { value: new THREE.Vector3() }, R: { value: face.raio_m }, chao: { value: face.chao_m },
     faixa: { value: new THREE.Vector4(...face.lon.map((x) => x * Math.PI / 180), ...face.lat.map((x) => x * Math.PI / 180)) },
-    tinta: { value: new THREE.Vector3(1, 1, 1) }, expo: { value: 1 }, sat: { value: 1 }, kNoite: { value: 0 }, escuro: { value: 0 },
-    ceuTopo: { value: new THREE.Vector3() }, ceuHoriz: { value: new THREE.Vector3() }, nevoa: { value: new THREE.Vector3() }, forca: { value: 1 },
+    tinta: { value: new THREE.Vector3(1, 1, 1) }, expo: { value: 1 }, sat: { value: 1 }, contraste: { value: 1 }, kNoite: { value: 0 }, escuro: { value: 0 },
+    kCeuFoto: { value: 0 }, alfaMeio: { value: face.alfa_meio ? 1 : 0 }, ceuTopo: { value: new THREE.Vector3() }, ceuHoriz: { value: new THREE.Vector3() }, nevoa: { value: new THREE.Vector3() }, forca: { value: 1 },
   };
   const mat = new THREE.ShaderMaterial({ vertexShader: VERT, fragmentShader: FRAG, uniforms: U, transparent: true, depthTest: false, depthWrite: false,
     blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneMinusSrcAlphaFactor });
@@ -139,8 +156,8 @@ async function criarVistaGerada({ cena, PTS, andar, final, RAIO, base = "assets/
     },
     aplicaHora(el, minutos) {
       const F = filtroDaHora(el, minutos);
-      U.tinta.value.set(...F.tinta); U.expo.value = F.expo; U.sat.value = F.sat; U.kNoite.value = F.kNoite; U.escuro.value = F.escuro;
-      U.ceuTopo.value.set(...F.topo); U.ceuHoriz.value.set(...F.horiz); U.nevoa.value.set(...F.nevoa);
+      U.tinta.value.set(...F.tinta); U.expo.value = F.expo; U.sat.value = F.sat; U.contraste.value = F.contraste; U.kNoite.value = F.kNoite; U.escuro.value = F.escuro;
+      U.kCeuFoto.value = (face.ceu_foto ? 1 : 0) * F.kCeuFoto; U.ceuTopo.value.set(...F.topo); U.ceuHoriz.value.set(...F.horiz); U.nevoa.value.set(...F.nevoa);
       if (typeof window !== "undefined") window.__vistaGerada = { ponto: atual, el: +el.toFixed(2), minutos, O: U.O.value.toArray().map((x) => +x.toFixed(2)), andar: nAndar, ...F };
     },
     antes(camera, ponto, andando) {
