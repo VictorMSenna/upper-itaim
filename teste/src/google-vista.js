@@ -948,7 +948,7 @@ void main(){
   if (m > 0.002 && temJanela > 0.5) { // the window: Google's city where the pano's 'fora' mask is open
     vec4 g; bool ok = true;
     if (usaCubo > 0.5) ok = cubo(d, g); else { g = texture2D(tG, gl_FragCoord.xy / res); if (despre > 0.5 && g.a > 0.0) g.rgb /= g.a; }
-    if (ok) { float aw = m * forca; rgb += paraSrgb(mix(ceu, g3dOmbro(g.rgb * ganho, ombro), g.a)) * aw; a += aw; } // face not shot yet: our render's city stays
+    if (ok) { float aw = m * forca; rgb += paraSrgb(mix(ceu, g3dOmbro(g.rgb * ganho, ombro), g.a)) * aw; a += aw;${typeof location !== 'undefined' && /[?&]g3dburaco=1/.test(location.search) ? ' if (vUv.y < 0.5 && g.a < 0.5) rgb = vec3(1.0, 0.0, 1.0) * aw;' : ''} } // face not shot yet: our render's city stays. 22/10 ITEM 8: ?g3dburaco=1 paints MAGENTA where Google drew nothing BELOW the horizon (the 'sky-coloured holes' under the balcony railing), for counting in tests
   }
   if (usaVidro > 0.5) {
     vec2 v = texture2D(tV, vUv).rg;

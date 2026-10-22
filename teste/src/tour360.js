@@ -14,8 +14,16 @@ import { SOL } from './dados-sol.js';
 import { MisturaPonto, ROTULO, INFO, VEU } from './render-mix.js';
 import { solNoInstante } from './interior-sol.js';
 
-let atual = null;
-export async function abrirTour360(opts) { if (atual) atual.fechar(false); atual = await criar(opts); return atual.api; }
+let atual = null, geracao = 0;
+// 21/10 MANCHAS-360: the tour registers itself as `atual` as soon as its state exists, BEFORE the first paint and Google's
+// start (seconds on a cold cache). Before, `atual` was set only when criar() returned, so an hour / season / lamp change made
+// while the tour was opening (definirHora below = atual?.api...) was dropped: the bar said 21:00 and the 360 stayed at 09:00.
+export async function abrirTour360(opts) {
+  const g = ++geracao;
+  if (atual) atual.fechar(false);
+  const h = await criar({ ...opts, registrar: (x) => { if (g !== geracao) { x.fechar(false); return; } if (atual && atual !== x) atual.fechar(false); atual = x; } });
+  return h.api;
+}
 export function definirHora(m) { atual?.api.definirHora(m); }
 export function definirEstacao(e) { atual?.api.definirEstacao(e); }
 export function definirLuz(n, l) { atual?.api.definirLuz(n, l); }
@@ -43,8 +51,18 @@ function luzesAuto(estacao, minutos) {
   return Object.fromEntries(CENA.luzes.map((k) => [k, el < -2 && CENA.luzesNoite.includes(k)]));
 }
 
+// 21/10 MANCHAS-360: a lost WebGL context reloads the page one tier down (capacidade.rebaixar). The visit comes back where it was:
+// the app restores season + hour from this record (app.js deepLink) and the tour its point and view (criar below), then drops it.
+const CHAVE_RETORNO = chaveLocal('tabela3d-360-retorno');
+export function retorno360(numero) {
+  try {
+    const o = JSON.parse(sessionStorage.getItem(CHAVE_RETORNO) || 'null');
+    if (o && String(o.numero) === String(numero) && Date.now() - o.t < 120e3) return o;
+  } catch (e) { /* storage blocked */ }
+  return null;
+}
 async function criar({ container, manifesto = 'assets/render/tour360/manifesto.json', ponto, estacao = 'inverno', minutos = 900,
-  luzes = null, aoFechar, teste = false, andar = null, final = null, numero = null, torre = null }) {
+  luzes = null, aoFechar, teste = false, andar = null, final = null, numero = null, torre = null, registrar = null }) {
   const man = typeof manifesto === 'string' ? await (await fetch(manifesto)).json() : manifesto;
   const base = typeof manifesto === 'string' ? manifesto.replace(/[^/]*$/, '') : (man.base || '');
   const PTS = Object.fromEntries(man.pontos.map((p) => [p.id, p]));
@@ -53,6 +71,8 @@ async function criar({ container, manifesto = 'assets/render/tour360/manifesto.j
   // first view: the middle of the room facing the balcony when it has the new render (window mask = its own exposure +
   // Google city of the unit); otherwise the first point with a window mask; the manifest order last (07/10 Victor)
   const pontoInicial = () => (man.pontos.find((p) => p.id === CENA.inicio && p.camadas && p.camadas.fora) || man.pontos.find((p) => p.camadas && p.camadas.fora) || man.pontos[0]).id; // Victor 08/10: the tour starts at the entrance
+  const volta = numero != null ? retorno360(numero) : null; // MANCHAS-360: back from a context-loss reload
+  if (volta) { try { sessionStorage.removeItem(CHAVE_RETORNO); } catch (e) { /* ignore */ } if (!ponto && PTS[volta.ponto]) ponto = volta.ponto; }
   const estado = { estacao, minutos, luzes: { ...(luzesDoCliente() || luzes || luzesAuto(estacao, minutos)) }, ponto: ponto && PTS[ponto] ? ponto : pontoInicial() };
   let G = null; // B10 (ON in the published site): live layer with Google Photorealistic 3D Tiles behind the `fora` window mask; null = current behaviour
 
@@ -103,7 +123,10 @@ async function criar({ container, manifesto = 'assets/render/tour360/manifesto.j
   const cv = raiz.querySelector('.t360-cv');
   const renderer = new THREE.WebGLRenderer({ canvas: cv, antialias: true, preserveDrawingBuffer: teste });
   // GPU ran out of memory (black screen on Victor's M21s at 3072): this device goes one level down and the page reopens here
-  cv.addEventListener('webglcontextlost', (ev) => { ev.preventDefault(); if (rebaixar()) setTimeout(() => location.reload(), 300); });
+  // MANCHAS-360: the reload keeps the visit (season + hour via the app, point + view here); no tier left to step down = the
+  // context comes back in place: every point is repainted from scratch with the CURRENT state (recuperaContexto)
+  cv.addEventListener('webglcontextlost', (ev) => { ev.preventDefault(); if (rebaixar()) { guardaRetorno(); setTimeout(() => location.reload(), 300); } });
+  cv.addEventListener('webglcontextrestored', () => { if (!fechado) recuperaContexto(); });
   renderer.setPixelRatio(Math.min(capacidade().dprMax, window.devicePixelRatio || 1)); // tier of this device (src/capacidade.js) // 07/10 Victor: full screen density on phones (max 3) // orq 07/10 08:4x: phones at real screen density (1.0 made a 390-px image stretched ~3x = blurry on Victor's phone); one sphere is cheap
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.NoToneMapping;
@@ -129,18 +152,36 @@ async function criar({ container, manifesto = 'assets/render/tour360/manifesto.j
     // 12-bit lamp low bits arrived (render-mix.js). 13/10 Victor (R2, rings at night in the kitchen): when they landed
     // during the walk to this point (estado.ponto still the old one; cached files land in < 600 ms) the repaint was
     // skipped and the 8-bit picture stayed until the next sun move. Now the point remembers it and repaints on arrival.
-    mix.aoRefinar = () => { if (fechado) return; if (estado.ponto === id) repinta(); else e.refinar = true; };
+    // MANCHAS-360: 'this point' = the one on screen, i.e. the walk's destination while walking (pontoVisivel)
+    mix.aoRefinar = () => { if (fechado) return; if (pontoVisivel() === id) repinta(); else e.refinar = true; };
     mix.refLuz = REF_LUZ; // R1: one fixed night white balance (the white kitchen light) for every point
     const e = { m, mix, pronto: null, refinar: false };
     esferas.set(id, e);
     return e;
   }
+  // 21/10 MANCHAS-360 (Victor, unit 131, 'varanda' at 21h with the spots: blue / pink / green stains that never went away).
+  // Measured cause: a change of hour / season / lamps that came DURING a walk repainted the point being LEFT (estado.ponto
+  // changes only at the end of the walk) and the destination kept the picture of the state of the walk's start (09:00 = day
+  // exposure 0.497 under a 21:00 bar, Google's day city in the glass); it was only repainted when 12-bit lamp bits landed.
+  // Now: the point on screen is the destination while walking; every paint records the state it used (render-mix
+  // ultimo.estado); at the end of a walk and after every paint the point on screen is compared with the CURRENT state and
+  // repainted until they match. Google's window follows only the point on screen.
+  let destino = null;
+  const pontoVisivel = () => destino || estado.ponto;
+  function emDia(e) {
+    const u = e.mix.ultimo;
+    if (!u || !u.estado || e.refinar) return false;
+    const s = u.estado;
+    return s.estacao === estado.estacao && s.minutos === estado.minutos && u.veu === VEU.fora.value
+      && CENA.luzes.every((k) => !!s.luzes[k] === !!estado.luzes[k]);
+  }
   async function pinta(id) {
     const e = esfera(id);
     e.refinar = false; // this paint reads whatever low bits are here now; a later arrival sets it again
-    const tx = await e.mix.atualizar(estado);
+    const tx = await e.mix.atualizar(estado); // one paint at a time per point, state read when it starts (render-mix)
+    if (fechado || !tx) return e;
     e.m.material.map = tx; e.m.material.needsUpdate = true;
-    if (G) G.aposPintar(id, e);
+    if (G && id === pontoVisivel()) G.aposPintar(id, e);
     return e;
   }
 
@@ -152,8 +193,11 @@ async function criar({ container, manifesto = 'assets/render/tour360/manifesto.j
     g.fillStyle = 'rgba(255,255,255,0.35)'; g.beginPath(); g.arc(64, 64, 40, 0, 7); g.fill();
     const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
   })();
+  // MANCHAS-360: the floor rings are rebuilt on every walk; their geometry / material are freed (renderer.info: +1 geometry per
+  // 2 walks before, measured with docs/b10-scripts/manchas_360.mjs)
+  function limpaHot() { for (const m of grupoHot.children) { m.geometry.dispose(); m.material.dispose(); } grupoHot.clear(); }
   function montaHot() {
-    grupoHot.clear();
+    limpaHot();
     const p = PTS[estado.ponto];
     for (const vid of p.vizinhos || []) {
       const q = PTS[vid]; if (!q) continue;
@@ -311,10 +355,12 @@ async function criar({ container, manifesto = 'assets/render/tour360/manifesto.j
   let andando = null;
   async function irPara(id, { dur = 600 } = {}) {
     if (!PTS[id] || id === estado.ponto || andando) return andando;
+    destino = id; // MANCHAS-360: from now on a change of hour / lamps repaints THIS point (repinta / aoRefinar)
     andando = (async () => {
       const de = esfera(estado.ponto), para = await pinta(id);
+      if (fechado) return;
       para.m.visible = true; para.m.material.opacity = 0; para.m.renderOrder = 1; de.m.renderOrder = 0;
-      grupoHot.clear();
+      limpaHot();
       const p0 = paraMundo(PTS[estado.ponto].pos), p1 = paraMundo(PTS[id].pos);
       const t0 = performance.now();
       await new Promise((ok) => {
@@ -327,24 +373,59 @@ async function criar({ container, manifesto = 'assets/render/tour360/manifesto.j
         };
         requestAnimationFrame(passo);
       });
+      if (fechado) return;
       de.m.visible = false; para.m.material.opacity = 1;
-      de.mix.soltarCamadas(); // (B1) release the layers of the point we left
-      estado.ponto = id; raiz.querySelector('.t360-nome').textContent = PTS[id].nome;
+      estado.ponto = id; destino = null; raiz.querySelector('.t360-nome').textContent = PTS[id].nome;
+      // (B1) release the layers of the point we left (queued after any paint of it still in flight, render-mix)
+      if (de !== para) de.mix.soltarCamadas();
       andando = null; // before the last frame: Google's window view only draws/loads when not walking (Victor 08/10: the city only loaded after moving the camera)
       montaHot(); desenha();
-      if (para.refinar) repinta(); // R2: the 12-bit low bits landed during the walk
+      // MANCHAS-360: the point we arrived at must show the CURRENT state (hour / season / lamps changed during the walk, or
+      // the 12-bit low bits landed, R2); repinta() checks it again after each paint, so no race can leave an old picture
+      if (!emDia(para)) repinta(); else avisoSol(para);
     })();
+    // a failed walk (layer fetch error) never leaves the tour locked in 'walking' (before: every later tap was ignored)
+    const esta = andando;
+    esta.catch((err) => console.warn('tour360: caminhada falhou', err && err.message)).finally(() => { if (andando === esta) andando = null; if (destino === id) destino = null; });
     return andando;
   }
 
   // (B1) the sun bar fires many changes: one repaint at a time, latest state wins (no pile of concurrent decodes)
+  // MANCHAS-360: it paints the point ON SCREEN (the destination while walking) and loops until that point's picture was
+  // made with the current state (a change that lands while a paint is in flight is never lost)
   let pintando = null, pendente = false;
   async function repinta() {
+    if (fechado) return null;
     if (pintando) { pendente = true; return pintando; }
     pintando = (async () => {
-      do { pendente = false; const e = await pinta(estado.ponto); e.m.visible = true; avisoSol(e); desenha(); } while (pendente);
+      let semPedido = 0;
+      while (!fechado) {
+        pendente = false;
+        const alvo = pontoVisivel();
+        const e = await pinta(alvo);
+        if (fechado) break;
+        if (alvo === estado.ponto && !andando) { e.m.visible = true; avisoSol(e); }
+        desenha();
+        if (pendente) continue; // a newer change arrived during this paint: always painted
+        if (emDia(esfera(pontoVisivel()))) break;
+        if (++semPedido >= 3) break; // (never seen) guard against a point that cannot reach the state
+      }
     })().finally(() => { pintando = null; });
     return pintando;
+  }
+  // MANCHAS-360: record for the context-loss reload (see retorno360)
+  function guardaRetorno() {
+    if (numero == null) return;
+    try { sessionStorage.setItem(CHAVE_RETORNO, JSON.stringify({ numero: String(numero), estacao: estado.estacao, minutos: estado.minutos, ponto: estado.ponto, yaw, pitch, fov, t: Date.now() })); } catch (e) { /* no storage: the visit restarts */ }
+  }
+  // context restored in place: every GPU object is new and the layer textures dropped their CPU copy (render-mix), so every
+  // point fetches its layers again (HTTP cache) and the point on screen is repainted with the current state. Google's
+  // overlay is not restarted (it would be one more Google session): our render's city shows in the window.
+  function recuperaContexto() {
+    if (G) { try { G.liberar(); } catch (e) { /* ignore */ } G = null; window.__g3dVista = null; }
+    VEU.fora.value = 0;
+    for (const e of esferas.values()) { e.mix.esquecerCamadas(); e.refinar = true; }
+    repinta();
   }
   // S2 (15/10): another facade than the render's and the card says the balcony has sun now -> say so instead of faking it
   function avisoSol(e) { const a = raiz.querySelector('.t360-aviso-sol'); if (a) a.hidden = !(e.mix.outraFace() && e.mix.cvAgora(estado.estacao, estado.minutos) > 0.5); }
@@ -519,15 +600,41 @@ async function criar({ container, manifesto = 'assets/render/tour360/manifesto.j
   // 21/10 SACADA-GOOGLE-JA: Google off / failed -> our render's city back in the window (the haze was only a wait for Google)
   function semGoogle() { if (VEU.fora.value) { VEU.fora.value = 0; if (!fechado) repinta(); } }
 
+  // ---------------------------------------------------------------- API (MANCHAS-360: built and registered BEFORE the first paint)
+  const api = {
+    definirHora: (m) => { estado.minutos = m; luzesPelaHora(); return repinta(); },
+    definirEstacao: (e) => { estado.estacao = e; luzesPelaHora(); return repinta(); },
+    definirLuz: (n, l) => { estado.luzes[n] = !!l; marcaLuzes(); return repinta(); },
+    irPara,
+    olhar: (y, p = 0, f = fov) => { yaw = y; pitch = p; fov = f; aplicaCam(); desenha(); },
+    // screen position (CSS px, relative to the canvas) of the floor spots in view, for tests and tooltips
+    hotspots: () => { const r = cv.getBoundingClientRect(); return grupoHot.children.map((m) => { const v = m.position.clone().project(camera);
+      return { id: m.userData.id, x: r.left + (v.x * 0.5 + 0.5) * r.width, y: r.top + (-v.y * 0.5 + 0.5) * r.height, visivel: v.z < 1 && Math.abs(v.x) < 1 && Math.abs(v.y) < 1 }; }); },
+    cursor: () => cv.className,
+    chips: () => chipsAtuais.slice(), // D4: neighbours reachable by a chip (rings not tappable from this view)
+    // MANCHAS-360: `pintado` = the state the picture on screen was made with (render-mix ultimo.estado) and `emDia` = it is the
+    // current one (tests: docs/b10-scripts/manchas_360.mjs)
+    estado: () => { const e = esfera(estado.ponto), u = e.mix.ultimo;
+      return { ...estado, luzes: { ...estado.luzes }, yaw, pitch, fov, expo: u?.expo, lG: u?.lG, andando: !!andando,
+        pintado: u && u.estado ? { ...u.estado, luzes: { ...u.estado.luzes }, veu: u.veu, el: u.sol && Number.isFinite(u.sol.el) ? +u.sol.el.toFixed(2) : null } : null, emDia: emDia(e),
+        google: G ? { ...(window.__g3d || {}), ms: G.perf.n ? G.perf.ms / G.perf.n : 0, max: G.perf.max, n: G.perf.n } : null }; },
+    fechar: () => fechar(true),
+    renderer,
+  };
+  const alca = { api, fechar, raiz };
+  if (registrar) registrar(alca);
+
   // ---------------------------------------------------------------- start
   camera.position.copy(paraMundo(PTS[estado.ponto].pos));
+  if (volta && volta.ponto === estado.ponto) { yaw = +volta.yaw || 0; pitch = +volta.pitch || 0; fov = +volta.fov || fov; } // context-loss reload: same view
   raiz.querySelector('.t360-nome').textContent = PTS[estado.ponto].nome;
   aplicaCam(); redim(); marcaLuzes();
   // 21/10 SACADA-GOOGLE-JA: from the very first frame the window waits for Google's city with the haze of the hour (no swap of
   // our render's city for Google's); Google starts loading right below (ligaGoogle), with no gesture needed
   VEU.fora.value = /[?&]google3d=0/.test(location.search) ? 0 : 1;
-  await repinta(); montaHot(); desenha();
-  await ligaGoogle();
+  await repinta(); if (fechado) return alca;
+  montaHot(); desenha();
+  await ligaGoogle(); if (fechado) return alca;
   raiz.dataset.ready = '1';
   if (/[?&]debug360=1/.test(location.search)) { // (B1) device report for Victor's screenshot
     const d = document.createElement('pre');
@@ -540,20 +647,5 @@ ${navigator.userAgent.slice(0, 120)}`; };
     atualizaDbg(); setInterval(atualizaDbg, 2000); raiz.appendChild(d);
   }
 
-  const api = {
-    definirHora: (m) => { estado.minutos = m; luzesPelaHora(); return repinta(); },
-    definirEstacao: (e) => { estado.estacao = e; luzesPelaHora(); return repinta(); },
-    definirLuz: (n, l) => { estado.luzes[n] = !!l; marcaLuzes(); return repinta(); },
-    irPara,
-    olhar: (y, p = 0, f = fov) => { yaw = y; pitch = p; fov = f; aplicaCam(); desenha(); },
-    // screen position (CSS px, relative to the canvas) of the floor spots in view, for tests and tooltips
-    hotspots: () => { const r = cv.getBoundingClientRect(); return grupoHot.children.map((m) => { const v = m.position.clone().project(camera);
-      return { id: m.userData.id, x: r.left + (v.x * 0.5 + 0.5) * r.width, y: r.top + (-v.y * 0.5 + 0.5) * r.height, visivel: v.z < 1 && Math.abs(v.x) < 1 && Math.abs(v.y) < 1 }; }); },
-    cursor: () => cv.className,
-    chips: () => chipsAtuais.slice(), // D4: neighbours reachable by a chip (rings not tappable from this view)
-    estado: () => ({ ...estado, luzes: { ...estado.luzes }, yaw, pitch, fov, expo: esfera(estado.ponto).mix.ultimo?.expo, lG: esfera(estado.ponto).mix.ultimo?.lG, google: G ? { ...(window.__g3d || {}), ms: G.perf.n ? G.perf.ms / G.perf.n : 0, max: G.perf.max, n: G.perf.n } : null }),
-    fechar: () => fechar(true),
-    renderer,
-  };
-  return { api, fechar, raiz };
+  return alca;
 }

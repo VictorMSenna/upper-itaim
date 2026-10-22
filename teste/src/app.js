@@ -7,7 +7,7 @@ aplicarCoresCss(); // F38: legend dots and grid cells use the same state colours
 import { CONFIG } from './config.js';
 import { META, UNIDADES, PREDIO } from './dados.js';
 import { brl, brlCurto, m2, dataBR, STATUS, POSICAO, PLANTA, el, texto } from './util.js';
-import { PREDIO_CFG } from './predio.js';
+import { PREDIO_CFG, chaveLocal } from './predio.js';
 import { abrirTour } from './tour.js';
 import * as MET from './metricas.js'; // Card do Hugo (16/10): numbers of the building and unit cards (pure, tested in node)
 import * as DICAS from './dicas.js'; // ENTRAR-NO-AP 21/10: first-visit tips (window tap, inside the 360)
@@ -673,6 +673,9 @@ async function entrarApartamento(id, { semAnimacao = false } = {}) {
       controleSol: (M.stub || M.tour360) ? null : S.ctl,
       aoMudarSol: ({ estacao, minutos }) => { if (estacao) S.rel.estacao(estacao); if (minutos != null) S.rel.hora(minutos); },
       aoFechar: () => pedirSaida('modulo') });
+    // 21/10 MANCHAS-360: the clock may have moved while the 360 was opening (seconds on a cold cache): the inside view always
+    // ends on the bar's season and hour (tour360 now takes changes during its opening too; this covers every inside module)
+    { const j = S.rel.info(); if (j.est !== i.est || j.t !== i.t) { M.definirEstacao?.(j.est); M.definirHora?.(j.t); } }
     espelharEstadoInterior(S.ctl);
     legendaVistaInterior();
     const v = vistaInterior.get(id);
@@ -988,6 +991,12 @@ function deepLink() {
   if (m[2]) {
     // link straight into the apartment: make "back" land on the building with the card open
     try { history.replaceState(null, '', `#u${u.numero}`); } catch (e) { /* sandbox */ }
+    // 21/10 MANCHAS-360: back from the 360's context-loss reload (tour360.js guardaRetorno, < 2 min): same season and hour on the
+    // bar BEFORE entering (this .then runs before entrarApartamento reads the clock); the tour restores its point and view
+    try {
+      const o = JSON.parse(sessionStorage.getItem(chaveLocal('tabela3d-360-retorno')) || 'null');
+      if (o && String(o.numero) === String(u.numero) && Date.now() - o.t < 120e3) carregarSol().then((S) => { S.rel.estacao(o.estacao); S.rel.hora(o.minutos); }).catch(() => {});
+    } catch (e) { /* storage blocked */ }
     entrarApartamento(u.id, { semAnimacao: true });
   }
   return true;

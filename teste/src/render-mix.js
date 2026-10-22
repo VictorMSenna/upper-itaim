@@ -373,7 +373,19 @@ void main(){
     return v;
   }
   // (B1) free the layer textures of a point the visitor left (GPU memory); the mixed render target stays
-  soltarCamadas() { for (const p of this.cache.values()) p.then((t) => t && t.dispose()); this.cache.clear(); }
+  // 21/10 MANCHAS-360: queued behind a paint in flight (it was freeing the layers of a paint that was still mixing them)
+  soltarCamadas() { return this._naFila(() => { for (const p of this.cache.values()) p.then((t) => t && t.dispose()); this.cache.clear(); }); }
+  // context restored: the old GL objects are gone with the old context (dispose() would delete objects of another context,
+  // 'object does not belong to this context'); the layers are simply forgotten and fetched again (HTTP cache)
+  esquecerCamadas() { return this._naFila(() => { this.cache.clear(); this._chaveLoc = null; }); }
+  _naFila(fn) { const vez = (this._fila || Promise.resolve()).then(fn); this._fila = vez.catch(() => {}); return vez; }
+  // 21/10 MANCHAS-360 (Victor: blue/pink/green stains in unit 131, 'varanda', 21h): ONE paint at a time per point, in call order.
+  // Two paints of the same point used to interleave at their awaits (layers / exposure / scales of one with the gains of the
+  // other) and an older state could land last. Each paint reads the state when it STARTS (after the previous one ended) and
+  // writes what it used in `ultimo.estado` / `ultimo.veu`, so the caller can tell a stale picture from a current one.
+  atualizar(estado) { return this._naFila(() => this._atualizar(estado)); }
+  // the state a paint used, in the words the tour compares (season, minute, lamp set)
+  static estadoDe(estado, luzes) { return { estacao: estado.estacao, minutos: estado.minutos, luzes: Object.fromEntries(luzes.map((k) => [k, !!(estado.luzes && estado.luzes[k])])) }; }
   // which layers + gains for a state; also returns the analytic mean (for exposure/white balance)
   // 15/10 S2 (audit S2-SOL-DENTRO): ONE render (unit 107, balcony to 343.4 deg) is shown for all 117 units. Direct sun
   // (solvis) and its bounce (solind) are kept only when (1) the unit's balcony faces the same way as the rendered one and
@@ -453,7 +465,9 @@ void main(){
     if (dir && dir.media) for (let i = 0; i < 3; i++) media[i] += dir.g[i] * dir.media[i];
     return { lista: lista.slice(0, 7), media, mDentro, mFora, mDia, sol: s, dir, minutos, fSol };
   }
-  async atualizar(estado) {
+  async _atualizar(estado) {
+    if (this.liberado) return null;
+    const usado = MisturaPonto.estadoDe(estado, this.luzesOrdem); // snapshot taken with the plan below (same tick)
     const pl = this.plano(estado);
     this.emUso = new Set(pl.lista.map((it) => it.c.arq));
     const C = this.p.camadas;
@@ -465,6 +479,7 @@ void main(){
     const tx = await Promise.all(pl.lista.map((it) => this.textura(it.c.arq, false, !!it.c.joelho)));
     // low bits already here = used now; still downloading = this picture goes out at 8 bits and is redrawn when they land
     const txLo = await Promise.all(loP.map((p) => (p ? Promise.race([p, Promise.resolve(undefined)]) : null)));
+    if (this.liberado) return null;
     if (txLo.some((t) => t === undefined)) Promise.all(loP).then(() => { if (this.aoRefinar) this.aoRefinar(); }).catch(() => {});
     const U = this.mat.uniforms;
     U.usaVis.value = tDir && tDir.every(Boolean) ? 1 : 0;
@@ -539,6 +554,7 @@ void main(){
     // v4 window: exterior exposed on its own mean (brighter key than the room, like a real-estate photo), never
     // brighter than the room exposure would make it; at night the exterior keeps the room exposure
     const tFora = C.fora ? await this.textura(C.fora.arq) : null;
+    if (this.liberado) return null;
     if (tFora) this.emUso.add(C.fora.arq);
     U.usaFora.value = tFora ? 1 : 0;
     if (!tFora) U.tFora.value = PRETO;
@@ -573,12 +589,16 @@ void main(){
       let sl, sw;
       if (this._chaveLoc && performance.now() - this._chaveLoc.t < 1500 && this.r.readRenderTargetPixelsAsync) {
         [sl, sw] = this._chaveLoc.v;
-        if (!this._lendo) {
-          this._lendo = true; const b = new Uint8Array(64 * 32 * 4), usado = sw > 0 ? sl / sw : 0;
+        // 22/10 MANCHAS-360 (measured: entrada 12:00 kept the 09:00 key, expo 3.272 vs 2.678 = 0.29 stop, never corrected): a paint
+        // that reused the key while another readback was in flight was never checked (that readback compares the key of the paint
+        // that ISSUED it). It now asks for one more paint when the readback lands; that paint reads its own key back.
+        if (this._lendo) this._reler = true;
+        else {
+          this._lendo = true; this._reler = false; const b = new Uint8Array(64 * 32 * 4), usado = sw > 0 ? sl / sw : 0;
           this.r.readRenderTargetPixelsAsync(this.rtLoc, 0, 0, 64, 32, b).then(() => {
             const v = chaveDe(b); this._chaveLoc = { v, t: performance.now() };
-            if (Math.abs((v[1] > 0 ? v[0] / v[1] : 0) - usado) > 0.1 && this.aoRefinar) setTimeout(() => this.aoRefinar && this.aoRefinar(), 120);
-          }).catch(() => { this._chaveLoc = null; }).finally(() => { this._lendo = false; });
+            if ((this._reler || Math.abs((v[1] > 0 ? v[0] / v[1] : 0) - usado) > 0.1) && this.aoRefinar) setTimeout(() => this.aoRefinar && this.aoRefinar(), 120);
+          }).catch(() => { this._chaveLoc = null; if (this._reler && this.aoRefinar) setTimeout(() => this.aoRefinar && this.aoRefinar(), 120); }).finally(() => { this._lendo = false; this._reler = false; });
         }
       } else {
         this.r.readRenderTargetPixels(this.rtLoc, 0, 0, 64, 32, this.bufLoc);
@@ -592,10 +612,10 @@ void main(){
       if (sw > 0) U.expo.value = 2 ** (Math.max(-1, Math.min(2, (T - U.lG.value) * 1.0)) * kDia);
     }
     this.r.setRenderTarget(this.rt); this.r.render(this.cena, this.cam); this.r.setRenderTarget(null);
-    this.ultimo = { ...pl, expo: K * U.expo.value, lG: U.lG.value + Math.log2(U.expo.value) };
+    this.ultimo = { ...pl, expo: K * U.expo.value, lG: U.lG.value + Math.log2(U.expo.value), estado: usado, veu: U.veuFora.value };
     return this.rt.texture;
   }
-  liberar() { this.rt.dispose(); this.mat.dispose(); this.rtLum.dispose(); this.rtLoc.dispose(); this.matBorra.dispose(); for (const p of this.cache.values()) p.then((t) => t && t.dispose()); }
+  liberar() { this.liberado = true; this.rt.dispose(); this.mat.dispose(); this.rtLum.dispose(); this.rtLoc.dispose(); this.matBorra.dispose(); for (const p of this.cache.values()) p.then((t) => t && t.dispose()); }
 }
 export let ALVO = 0.30;   // mean-luminance key (tuned on the proof prints; see RELATORIO-B6)
 export function definirAlvo(x) { ALVO = x; }
