@@ -9,6 +9,12 @@
 // gradient per hour); noite = emission of the lit windows + street lights (one fixed random subset). The hour of the tour's
 // own time bar drives a continuous blend: exposure + colour filter (morning, noon, golden afternoon, dusk) and the night layer.
 // Google's tiles are never drawn in the same frame: the points this covers switch Google's window off (tour360.js asks cobre()).
+// VISTA-SACADA-ALTURA (26/10 report: the view looked down on every roof and was not parallel to the neighbours): N and S images are
+// now in TRUE angles seen from the drone's own eye (vista.json o_ref = floor-1 eye minus drone eye; lon 0 = facade normal, lat 0 =
+// true horizon; before they were rotated 18 deg (N) / 35 deg (S) and stretched 1.1-1.2x). The drone flew 95-150 m up; each floor's
+// eye (13.5-47.2 m) sees the backdrop cylinder from its real height, with the radius per floor (raio_por_andar) chosen so the
+// city's top edge rises exactly as much as the LiDAR skyline does from that floor (Fabrica-3D/ferramentas-ia/vista_altura.py).
+// W and E are N and S mirrored about the facade normal (espelha). Night sky: dark after nautical dusk (no day-sky leak).
 import * as THREE from "three";
 
 const VERT = "varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }";
@@ -39,6 +45,9 @@ uniform vec4 faixaCeu;     // lon0, lon1, lat0, lat1 (radians) of tCeu
 uniform float usaCeu;
 uniform vec4 pesos;        // manha, ouro (17h gold), crep (18h30 dusk), noite
 uniform vec3 zenite;       // clear-sky zenith colour of the hour (linear)
+uniform float espelha;     // 1 = this facade shows another face's image mirrored about the facade normal (W = N, E = S)
+uniform float plano;       // 1 = proxy is a WALL parallel to the facade at forward distance R (+ a 3R cylinder at the sides): rows of the
+                           // lifted city stay straight in perspective (a cylinder bent them into a bowl on the PC at low floors)
 vec3 lin(vec3 c){ return pow(max(c, vec3(0.0)), vec3(2.2)); }
 vec3 paraSrgb(vec3 c){ c = max(c, vec3(0.0)); return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c)); }
 void main(){
@@ -51,9 +60,15 @@ void main(){
   float a = dot(r.xy, r.xy), b = 2.0 * dot(O.xy, r.xy), c = dot(O.xy, O.xy) - R * R;
   float tc = a > 1e-6 ? (-b + sqrt(max(b * b - 4.0 * a * c, 0.0))) / (2.0 * a) : 1e6;
   float t = tc;
+  if (plano > 0.5) {
+    float R2 = 3.0 * R, c2 = dot(O.xy, O.xy) - R2 * R2;
+    t = a > 1e-6 ? (-b + sqrt(max(b * b - 4.0 * a * c2, 0.0))) / (2.0 * a) : 1e6;
+    if (r.x > 1e-4) t = min(t, (R - O.x) / r.x);
+  }
   if (r.z < -1e-4) { float tg = (chao - O.z) / r.z; if (tg > 0.0 && tg < tc) t = tg; }
   vec3 Q = O + r * t;
   float lon = atan(Q.y, Q.x), lat = atan(Q.z, length(Q.xy));
+  if (espelha > 0.5) lon = -lon;
   vec2 uv = vec2((lon - faixa.x) / (faixa.y - faixa.x), (lat - faixa.z) / (faixa.w - faixa.z));
   float el = asin(clamp(r.z, -1.0, 1.0));
   vec3 ceu = mix(ceuHoriz, ceuTopo, smoothstep(0.0, 0.75, el));
@@ -78,15 +93,17 @@ void main(){
     vec3 corC = mix(ceuHoriz, ceuTopo, smoothstep(0.0, 0.7, el)) * (0.55 + 0.9 * ls);
     vec3 crep = mix(corC, corN, nuvem);
     crep = mix(mix(ceuHoriz, ceuTopo, smoothstep(0.0, 0.75, el)), crep, aS);
-    // 21h: dark clouds over navy, lit from below by the city near the horizon
-    vec3 noiteN = vec3(0.020, 0.026, 0.050) * (0.5 + 1.6 * ls) + vec3(0.060, 0.034, 0.016) * smoothstep(0.30, 0.0, el);
+    // night: dark grey clouds over a near-black sky, lit from below by the city only near the horizon (ALTURA 26/10: darker)
+    vec3 noiteN = vec3(0.008, 0.009, 0.014) * (0.5 + 1.6 * ls) + vec3(0.022, 0.014, 0.008) * smoothstep(0.30, 0.0, el);
     vec3 noite = mix(mix(ceuHoriz, ceuTopo, smoothstep(0.0, 0.75, el)), noiteN, nuvem * aS);
     vec3 cc = mix(dia, ouro, pesos.y);
     cc = mix(cc, crep, pesos.z);
     cc = mix(cc, noite, pesos.w);
-    ceu = cc;
+    // ALTURA 26/10 (audit E4): the dome's lowest rows are stretched pixel columns ("rain" streaks just above the skyline):
+    // below ~6 deg the real clouds fade into the plain gradient of the hour (horizon haze)
+    ceu = mix(mix(ceuHoriz, ceuTopo, smoothstep(0.0, 0.75, el)), cc, smoothstep(0.015, 0.11, el));
   }
-  ceu += vec3(0.11, 0.06, 0.028) * kNoite * exp(-max(el, 0.0) / 0.06);   // city glow on the horizon at night
+  ceu += mix(vec3(0.11, 0.06, 0.028), vec3(0.030, 0.018, 0.009), pesos.w) * kNoite * exp(-max(el, 0.0) / 0.06);   // city glow on the horizon (dim at night)
   vec3 cor = ceu;
   if (uv.x > 0.0 && uv.x < 1.0 && uv.y > 0.0 && uv.y < 1.0) {
     vec4 B = texture2D(tBase, uv);
@@ -113,8 +130,11 @@ function filtroDaHora(el, minutos) {
   const manha = (1 - tarde) * suave(4, 30, el) * (1 - suave(45, 70, el));      // morning, sun up but not high
   const ouro = tarde * suave(32, 12, el) * suave(-2, 4, el);                  // afternoon golden hour
   const ouroM = (1 - tarde) * suave(16, 4, el) * suave(-2, 3, el) * 0.5;      // a softer gold at sunrise
-  const crep = suave(-13, -3, el) * (1 - suave(-1.5, 3, el));                 // dusk: pink horizon, blue sky
-  const noite = 1 - suave(-16, -7, el);
+  // dusk: pink horizon, blue sky. ALTURA 26/10: below -7.2 deg (18h30 key) dusk no longer FALLS before night rises (that left up
+  // to 58 % of the DAY sky at -10 deg, ~19h); it rises to 1 by -9.5 deg and hands over to night, complete at -15 deg (~19h05)
+  const crep0 = (x) => suave(-13, -3, x) * (1 - suave(-1.5, 3, x));
+  const crep = el >= -7.2 ? crep0(el) : crep0(-7.2) + (1 - crep0(-7.2)) * suave(-7.2, -9.5, el);
+  const noite = 1 - suave(-15, -8, el);
   let tinta = [1.0, 1.0, 1.0];
   tinta = mistura(tinta, [0.84, 0.95, 1.16], manha);
   tinta = mistura(tinta, [1.30, 0.98, 0.64], Math.max(ouro, ouroM));
@@ -123,7 +143,7 @@ function filtroDaHora(el, minutos) {
   let expo = (1.0 + 0.08 * suave(50, 70, el)) * (1 + 0.06 * manha);
   expo *= 1 - 0.08 * ouro;
   expo *= 1 - 0.62 * crep;
-  expo = expo * (1 - noite) + 0.10 * noite;
+  expo = expo * (1 - noite) + 0.07 * noite;   // ALTURA 26/10 (audit E12): night facades darker (were grey-lit)
   const contraste = 1 + 0.30 * ouro + 0.14 * manha + 0.12 * crep;
   const sat = (1.05 + 0.30 * ouro - 0.08 * manha) * (1 - 0.25 * crep) * (1 - 0.35 * noite);
   const kNoite = Math.max(1 - suave(-12, -2, el), 0) * (0.55 + 0.45 * suave(-6, -14, el));   // 18h30 partly lit, 21h all
@@ -131,13 +151,13 @@ function filtroDaHora(el, minutos) {
   topo = mistura(topo, [0.26, 0.48, 0.88], manha); horiz = mistura(horiz, [0.80, 0.88, 0.98], manha);
   topo = mistura(topo, [0.28, 0.40, 0.68], Math.max(ouro, ouroM)); horiz = mistura(horiz, [1.0, 0.70, 0.40], Math.max(ouro, ouroM));
   topo = mistura(topo, [0.10, 0.14, 0.40], crep); horiz = mistura(horiz, [0.98, 0.56, 0.58], crep);
-  topo = mistura(topo, [0.006, 0.012, 0.045], noite); horiz = mistura(horiz, [0.035, 0.05, 0.13], noite);
+  topo = mistura(topo, [0.0012, 0.0018, 0.0055], noite); horiz = mistura(horiz, [0.012, 0.012, 0.022], noite);   // ALTURA 26/10: night sky dark (was a light violet)
   const kCeuFoto = 0;
   // clear-sky zenith above the real clouds (linear): photo blue by day, deeper at gold, violet-blue at dusk, navy at night
   let zenite = mistura([0.09, 0.22, 0.62], [0.10, 0.20, 0.55], manha);
   zenite = mistura(zenite, [0.10, 0.17, 0.42], ouro);
   zenite = mistura(zenite, [0.05, 0.07, 0.24], crep);
-  zenite = mistura(zenite, [0.004, 0.008, 0.03], noite);   // real clouds by day, the gradient takes over at golden hour/dusk/night
+  zenite = mistura(zenite, [0.0012, 0.0018, 0.0055], noite);   // real clouds by day, the gradient takes over at golden hour/dusk/night
   return { kCeuFoto, zenite, tinta, expo, sat, contraste, kNoite, escuro: 0, topo, horiz, nevoa: horiz, pesos: { manha, ouro, crep, noite } };
 }
 
@@ -150,6 +170,11 @@ async function criarVistaGerada({ cena, PTS, andar, final, RAIO, base = "assets/
   const face = Object.values(cfg.faces || {}).find((f) => (f.finais || []).includes(Number(final ?? cfg.padrao.final)));
   if (!face) return null;
   const nAndar = Number(andar ?? cfg.padrao.andar);
+  // ALTURA 26/10: eye offset from the drone eye (o_ref, floor 1) + the floors above it; radius per floor (else the old fields)
+  const arqBase = face.base, arqNoite = face.noite;
+  const andarGer = face.o_ref ? 1 : face.andar_geracao;
+  const raio = (face.raio_por_andar && face.raio_por_andar[String(nAndar)]) || face.raio_m;
+  const chaoM = face.chao_m;
   const ref = PTS[face.ponto_ref] && PTS[face.ponto_ref].pos;
   if (!ref) return null;
   const carrega = (arq) => new Promise((ok) => new THREE.TextureLoader().load(base + arq, (t) => {
@@ -157,7 +182,7 @@ async function criarVistaGerada({ cena, PTS, andar, final, RAIO, base = "assets/
     t.colorSpace = THREE.NoColorSpace; t.generateMipmaps = true; t.minFilter = THREE.LinearMipmapLinearFilter; t.magFilter = THREE.LinearFilter;
     t.anisotropy = 4; ok(t);
   }, undefined, () => ok(null)));
-  const [tBase, tNoite, tCeu] = await Promise.all([carrega(face.base), carrega(face.noite), face.ceu ? carrega(face.ceu) : Promise.resolve(null)]);
+  const [tBase, tNoite, tCeu] = await Promise.all([carrega(arqBase), carrega(arqNoite), face.ceu ? carrega(face.ceu) : Promise.resolve(null)]);
   custo.msCargaDecod = Math.round(performance.now() - custo.t0);
   if (renderer) { const t1 = performance.now(); for (const t of [tBase, tNoite, tCeu]) if (t) renderer.initTexture(t); custo.msUpload = Math.round(performance.now() - t1); }
   if (typeof window !== "undefined") window.__vistaGeradaCusto = custo;
@@ -165,7 +190,7 @@ async function criarVistaGerada({ cena, PTS, andar, final, RAIO, base = "assets/
   const preto = new THREE.DataTexture(new Uint8Array([0, 0, 0, 255]), 1, 1); preto.needsUpdate = true;
   const U = {
     tM: { value: preto }, tBase: { value: tBase }, tNoite: { value: tNoite || preto },
-    O: { value: new THREE.Vector3() }, R: { value: face.raio_m }, chao: { value: face.chao_m },
+    O: { value: new THREE.Vector3() }, R: { value: raio }, chao: { value: chaoM }, espelha: { value: face.espelha ? 1 : 0 }, plano: { value: face.proxy === "plano" ? 1 : 0 },
     faixa: { value: new THREE.Vector4(...face.lon.map((x) => x * Math.PI / 180), ...face.lat.map((x) => x * Math.PI / 180)) },
     tinta: { value: new THREE.Vector3(1, 1, 1) }, expo: { value: 1 }, sat: { value: 1 }, contraste: { value: 1 }, kNoite: { value: 0 }, escuro: { value: 0 },
     kCeuFoto: { value: 0 }, tCeu: { value: tCeu || preto }, usaCeu: { value: tCeu ? 1 : 0 }, pesos: { value: new THREE.Vector4() }, zenite: { value: new THREE.Vector3() },
@@ -174,7 +199,8 @@ async function criarVistaGerada({ cena, PTS, andar, final, RAIO, base = "assets/
   const mat = new THREE.ShaderMaterial({ vertexShader: VERT, fragmentShader: FRAG, uniforms: U, transparent: true, depthTest: false, depthWrite: false,
     blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneMinusSrcAlphaFactor });
   const geo = new THREE.SphereGeometry(RAIO * 0.98, 96, 48); geo.scale(-1, 1, 1);   // same uv as the pano sphere
-  const malha = new THREE.Mesh(geo, mat); malha.renderOrder = modo === "espera" ? 2 : 3;   // espera: under the Google overlay (its fade = the cross-fade) malha.frustumCulled = false; malha.visible = false;
+  const malha = new THREE.Mesh(geo, mat); malha.renderOrder = modo === "espera" ? 2 : 3;   // espera: under the Google overlay (its fade = the cross-fade)
+  malha.frustumCulled = false; malha.visible = false;   // ALTURA 26/10: these two were inside the comment above
   cena.add(malha);
   const credito = document.createElement("div");
   credito.className = "t360-vg-credito"; credito.hidden = true;
@@ -185,14 +211,15 @@ async function criarVistaGerada({ cena, PTS, andar, final, RAIO, base = "assets/
   const pontos = new Set(face.pontos || Object.keys(PTS));
   let atual = null;
   const VG = {
-    malha, credito, face, andar: nAndar,
+    malha, credito, face, andar: nAndar, raio,
     cobre: (id) => pontos.has(id) && !!(PTS[id] && PTS[id].camadas && PTS[id].camadas.fora),
     aposPintar(id, e) {
       if (!this.cobre(id)) { atual = null; return; }
       atual = id;
       const p = PTS[id].pos;
       // pano frame: +v = balcony (forward), +u = left (paraMundo: world = (-v, h, u); right = -Z = -u)
-      U.O.value.set(p[1] - ref[1], -(p[0] - ref[0]), (p[2] - ref[2]) + (nAndar - face.andar_geracao) * face.piso_m);
+      U.O.value.set(p[1] - ref[1], -(p[0] - ref[0]), (p[2] - ref[2]) + (nAndar - andarGer) * face.piso_m);
+      if (face.o_ref) U.O.value.add(new THREE.Vector3(...face.o_ref));   // ALTURA: relative to the drone eye, real heights
       U.O.value.y += (face.desloc_final && face.desloc_final[String(final ?? cfg.padrao.final)]) || 0; // other units of the same facade: metres to the right
       U.tM.value = e.mix.mat.uniforms.tFora.value || preto;
       const el = e.mix.ultimo && e.mix.ultimo.sol && Number.isFinite(e.mix.ultimo.sol.el) ? e.mix.ultimo.sol.el : 20;
@@ -203,7 +230,7 @@ async function criarVistaGerada({ cena, PTS, andar, final, RAIO, base = "assets/
       const F = filtroDaHora(el, minutos);
       U.tinta.value.set(...F.tinta); U.expo.value = F.expo; U.sat.value = F.sat; U.contraste.value = F.contraste; U.kNoite.value = F.kNoite; U.escuro.value = F.escuro;
       U.kCeuFoto.value = 0; U.pesos.value.set(F.pesos.manha, F.pesos.ouro, F.pesos.crep, F.pesos.noite); U.zenite.value.set(...F.zenite); U.ceuTopo.value.set(...F.topo); U.ceuHoriz.value.set(...F.horiz); U.nevoa.value.set(...F.nevoa);
-      if (typeof window !== "undefined") window.__vistaGerada = { ponto: atual, el: +el.toFixed(2), minutos, O: U.O.value.toArray().map((x) => +x.toFixed(2)), andar: nAndar, ...F };
+      if (typeof window !== "undefined") window.__vistaGerada = { ponto: atual, el: +el.toFixed(2), minutos, O: U.O.value.toArray().map((x) => +x.toFixed(2)), andar: nAndar, raio, base: arqBase, espelha: !!face.espelha, ...F };
     },
     antes(camera, ponto, andando, G = null) {
       let ve = !andando && atual === ponto && this.cobre(ponto), fG = 0;

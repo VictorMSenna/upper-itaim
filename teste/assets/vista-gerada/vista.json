@@ -1,5 +1,5 @@
 {
- "_leia": "E0 22/10 v2 (prototipo, so a demo): vista da janela = 1 imagem por face, fundo distante (cilindro raio_m + chao) visto da posicao real de cada ponto do 360. v2: FOTO REAL do drone do Hugo (DJI 4K, abr/2026, voos 0198/0199 olhando para o norte), costurada (OpenCV) e posta na faixa lon/lat da face N; nenhum pixel do Google, nenhuma IA na cidade. Nao e a vista real da unidade: imagem ilustrativa. v2.1: ceu = nuvens REAIS do drone em todas as horas (norte-ceu.webp), pintadas por hora no shader. 26/10: faces S e E (E = S espelhada, o voo nao tem quadros olhando para leste); W = N espelhada (a costura oeste do voo 0203 saiu com fantasma).",
+ "_leia": "E0 22/10 v2 (prototipo, so a demo): vista da janela = 1 imagem por face, fundo distante (cilindro raio_m + chao) visto da posicao real de cada ponto do 360. v2: FOTO REAL do drone do Hugo (DJI 4K, abr/2026, voos 0198/0199 olhando para o norte), costurada (OpenCV) e posta na faixa lon/lat da face N; nenhum pixel do Google, nenhuma IA na cidade. Nao e a vista real da unidade: imagem ilustrativa. v2.1: ceu = nuvens REAIS do drone em todas as horas (norte-ceu.webp), pintadas por hora no shader. 26/10: faces S e E (E = S espelhada, o voo nao tem quadros olhando para leste); W = N espelhada (a costura oeste do voo 0203 saiu com fantasma). 26/10 ALTURA: N/S re-projected to true angles (facade normal, true horizon) from the drone eye; per floor the city is lifted by the LiDAR-measured skyline rise (eye 13.5-47.2 m vs drone 103/149 m); W = N and E = S mirrored by the shader (espelha); night sky dark.",
  "credito": "Vista da janela: imagem ilustrativa",
  "padrao": {
   "final": 7,
@@ -13,8 +13,8 @@
     7
    ],
    "ponto_ref": "varanda",
-   "base": "norte-base.webp",
-   "noite": "norte-noite.webp",
+   "base": "norte-v3-base.webp",
+   "noite": "norte-v3-noite.webp",
    "lon": [
     -76,
     84
@@ -24,7 +24,7 @@
     40
    ],
    "raio_m": 350,
-   "chao_m": -100,
+   "chao_m": -100000,
    "andar_geracao": 10,
    "piso_m": 2.81,
    "desloc_final": {
@@ -42,7 +42,30 @@
    "ceu_lat": [
     0,
     70
-   ]
+   ],
+   "o_ref": [
+    11.7,
+    9.9,
+    -89.93
+   ],
+   "raio_por_andar": {
+    "1": 309.0,
+    "2": 317.0,
+    "3": 351.0,
+    "4": 383.0,
+    "5": 410.0,
+    "6": 425.0,
+    "7": 443.0,
+    "8": 456.0,
+    "9": 504.0,
+    "10": 567.0,
+    "11": 657.0,
+    "12": 794.0,
+    "13": 858.0
+   },
+   "espelha": false,
+   "geracao": "ALTURA 26/10: N image in TRUE angles seen from the drone eye B5 [9.7, 103.4, 12.1] (vista_altura.py retifica); o_ref = floor-1 eye minus drone eye (forward, right, up m); raio_por_andar = distance of the backdrop wall (parallel to the facade, 3x that radius at the sides) that lifts the city top edge by the LiDAR-measured amount for that floor",
+   "proxy": "plano"
   },
   "S": {
    "ponto_ref": "varanda",
@@ -55,7 +78,7 @@
     40
    ],
    "raio_m": 350,
-   "chao_m": -100,
+   "chao_m": -100000,
    "andar_geracao": 10,
    "piso_m": 2.81,
    "alfa_meio": true,
@@ -72,13 +95,36 @@
     4,
     6
    ],
-   "base": "sul-base.webp",
-   "noite": "sul-noite.webp",
+   "base": "sul-v3-base.webp",
+   "noite": "sul-v3-noite.webp",
    "desloc_final": {
     "4": 10.355,
     "6": 0
    },
-   "fonte": "drone 0204 (17 quadros olhando S/SO, 120-170 m), costurado; vao da costura no horizonte coberto com a propria linha de predios ao lado"
+   "fonte": "drone 0204 (17 quadros olhando S/SO, 120-170 m), costurado; vao da costura no horizonte coberto com a propria linha de predios ao lado",
+   "o_ref": [
+    81.25,
+    25.8,
+    -135.02
+   ],
+   "raio_por_andar": {
+    "1": 562.0,
+    "2": 584.0,
+    "3": 609.0,
+    "4": 622.0,
+    "5": 652.0,
+    "6": 686.0,
+    "7": 726.0,
+    "8": 772.0,
+    "9": 827.0,
+    "10": 878.0,
+    "11": 903.0,
+    "12": 1034.0,
+    "13": 1052.0
+   },
+   "espelha": false,
+   "geracao": "ALTURA 26/10: S image in TRUE angles seen from the drone eye B5 [46.1, 148.49, -66.15] (vista_altura.py retifica); o_ref = floor-1 eye minus drone eye (forward, right, up m); raio_por_andar = distance of the backdrop wall (parallel to the facade, 3x that radius at the sides) that lifts the city top edge by the LiDAR-measured amount for that floor",
+   "proxy": "plano"
   },
   "E": {
    "ponto_ref": "varanda",
@@ -91,7 +137,7 @@
     40
    ],
    "raio_m": 350,
-   "chao_m": -100,
+   "chao_m": -100000,
    "andar_geracao": 10,
    "piso_m": 2.81,
    "alfa_meio": true,
@@ -108,13 +154,36 @@
     8,
     9
    ],
-   "base": "leste-base.webp",
-   "noite": "leste-noite.webp",
+   "base": "sul-v3-base.webp",
+   "noite": "sul-v3-noite.webp",
    "desloc_final": {
     "8": 0,
     "9": -5.1
    },
-   "fonte": "SEM cobertura de drone para leste (1 quadro): panorama da face S espelhado"
+   "fonte": "SEM cobertura de drone para leste (1 quadro): panorama da face S espelhado",
+   "o_ref": [
+    81.25,
+    -25.8,
+    -135.02
+   ],
+   "raio_por_andar": {
+    "1": 562.0,
+    "2": 584.0,
+    "3": 609.0,
+    "4": 622.0,
+    "5": 652.0,
+    "6": 686.0,
+    "7": 726.0,
+    "8": 772.0,
+    "9": 827.0,
+    "10": 878.0,
+    "11": 903.0,
+    "12": 1034.0,
+    "13": 1052.0
+   },
+   "espelha": true,
+   "geracao": "ALTURA 26/10: S image in TRUE angles seen from the drone eye B5 [46.1, 148.49, -66.15] (vista_altura.py retifica), mirrored about the facade normal; o_ref = floor-1 eye minus drone eye (forward, right, up m); raio_por_andar = distance of the backdrop wall (parallel to the facade, 3x that radius at the sides) that lifts the city top edge by the LiDAR-measured amount for that floor",
+   "proxy": "plano"
   },
   "W": {
    "ponto_ref": "varanda",
@@ -127,7 +196,7 @@
     40
    ],
    "raio_m": 350,
-   "chao_m": -100,
+   "chao_m": -100000,
    "andar_geracao": 10,
    "piso_m": 2.81,
    "alfa_meio": true,
@@ -144,13 +213,36 @@
     1,
     2
    ],
-   "base": "oeste-base.webp",
-   "noite": "oeste-noite.webp",
+   "base": "norte-v3-base.webp",
+   "noite": "norte-v3-noite.webp",
    "desloc_final": {
     "1": 5.05,
     "2": 0
    },
-   "fonte": "cobertura de drone para oeste insuficiente (voo 0203: ~80 graus, costura com fantasma e degrau de exposicao): panorama da face N espelhado"
+   "fonte": "cobertura de drone para oeste insuficiente (voo 0203: ~80 graus, costura com fantasma e degrau de exposicao): panorama da face N espelhado",
+   "o_ref": [
+    11.7,
+    -9.9,
+    -89.93
+   ],
+   "raio_por_andar": {
+    "1": 309.0,
+    "2": 317.0,
+    "3": 351.0,
+    "4": 383.0,
+    "5": 410.0,
+    "6": 425.0,
+    "7": 443.0,
+    "8": 456.0,
+    "9": 504.0,
+    "10": 567.0,
+    "11": 657.0,
+    "12": 794.0,
+    "13": 858.0
+   },
+   "espelha": true,
+   "geracao": "ALTURA 26/10: N image in TRUE angles seen from the drone eye B5 [9.7, 103.4, 12.1] (vista_altura.py retifica), mirrored about the facade normal; o_ref = floor-1 eye minus drone eye (forward, right, up m); raio_por_andar = distance of the backdrop wall (parallel to the facade, 3x that radius at the sides) that lifts the city top edge by the LiDAR-measured amount for that floor",
+   "proxy": "plano"
   }
  }
 }

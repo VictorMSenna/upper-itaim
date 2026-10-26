@@ -427,7 +427,23 @@ export function criarCena({ container, predio, unidades, teste = false,
   controls.touches.three = CameraControls.ACTION.NONE;
   // 22/10 ITEM 11: &embutido=1 = the wheel without Ctrl never reaches camera-controls (it would preventDefault): the page scrolls;
   // Ctrl+wheel (and a pinch) still zooms the model
-  if (/[?&]embutido=1/.test(location.search)) container.addEventListener('wheel', (e) => { if (!e.ctrlKey) e.stopPropagation(); }, { capture: true });
+  // 26/10 Sites A5 (measured: Ctrl+wheel moved the distance 0 m): camera-controls turns any wheel with ctrlKey into ACTION.ZOOM =
+  // lens zoom (camera.zoom), outside the Upper's distance limits. With &embutido=1, Ctrl+wheel and the trackpad pinch (Chrome sends
+  // it as a wheel with ctrlKey) are handled here as a DOLLY with the same step as the plain wheel on Hugo's link (0.95 ^ (deltaY/30))
+  // and dollyTo clamps it to minDistance..maxDistance. Hugo's link without &embutido=1 is unchanged.
+  let a5Alvo = null, a5T = 0;
+  if (/[?&]embutido=1/.test(location.search)) container.addEventListener('wheel', (e) => {
+    e.stopPropagation();
+    if (!e.ctrlKey) return;
+    e.preventDefault();
+    if (!controls.enabled) return;
+    const dy = e.deltaMode === 1 ? e.deltaY * 40 : e.deltaMode === 2 ? e.deltaY * 800 : e.deltaY;
+    const agora = performance.now();
+    if (a5Alvo == null || agora - a5T > 400) a5Alvo = controls.distance;
+    a5T = agora;
+    a5Alvo = THREE.MathUtils.clamp(a5Alvo * Math.pow(0.95, -dy / 30 * controls.dollySpeed), controls.minDistance, controls.maxDistance);
+    controls.dollyTo(a5Alvo, true);
+  }, { capture: true, passive: false });
 
   const caixaPredio = new THREE.Box3(new THREE.Vector3(BX0, 0, BZ0), new THREE.Vector3(BX1, TOPO, BZ1));
   const ALVO = caixaPredio.getCenter(new THREE.Vector3());
@@ -1481,6 +1497,30 @@ export function criarCena({ container, predio, unidades, teste = false,
       alvoDist: +t.distanceTo(ALVO).toFixed(2), dist: +controls.distance.toFixed(1), azimute: +THREE.MathUtils.radToDeg(controls.azimuthAngle).toFixed(1),
       livre: [livreW, livreH], canvas: [r.width, r.height] };
   }
+  // 26/10 Sites A1 (hero = the whole viewer in an iframe): the tower's bounding box (PB.grupo = B5 volumes + balconies + crown,
+  // ground to top) projected on screen, NOT clamped to the free area (medirEnquadramento clamps), CSS px of the page.
+  // null if a corner is behind the camera. Nothing in the viewer calls it.
+  let caixaA1 = null; const vCaixa = new THREE.Vector3();
+  function caixaNaTela() {
+    if (!caixaA1) caixaA1 = new THREE.Box3().setFromObject(PB.grupo);
+    camera.updateMatrixWorld();
+    const r = canvas.getBoundingClientRect(), a = caixaA1.min, b = caixaA1.max;
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const x of [a.x, b.x]) for (const y of [a.y, b.y]) for (const z of [a.z, b.z]) {
+      vCaixa.set(x, y, z).project(camera);
+      if (vCaixa.z > 1 || vCaixa.z < -1) return null;
+      const sx = (vCaixa.x * 0.5 + 0.5) * largura, sy = (-vCaixa.y * 0.5 + 0.5) * altura;
+      x0 = Math.min(x0, sx); x1 = Math.max(x1, sx); y0 = Math.min(y0, sy); y1 = Math.max(y1, sy);
+    }
+    return { x0: r.left + x0, y0: r.top + y0, x1: r.left + x1, y1: r.top + y1 };
+  }
+  // 26/10 Sites A2/A3: what is on screen yet, for an honest load bar and a 'pronto' only after the city.
+  // google: 'desligado' (?google3d=0) | 'iniciando' (module / session not up yet) | 'carregando' | 'mostrando' | 'sem' (no key,
+  // no session or failed: our city is the city)
+  function estadoCarga() {
+    const g = /[?&]google3d=0/.test(location.search) ? 'desligado' : gCena ? (gCena.mostrando ? 'mostrando' : 'carregando') : googleEsperado ? 'iniciando' : 'sem';
+    return { quadro: !!stats.pronto, fachada: b7Ativo('fachada') ? !!b7.fachada : null, entorno: DRONE ? !!entB7.carregado : null, google: g };
+  }
   function solDebug() {
     const topo = projetar(CX, TOPO, CZ);
     const ds = disco.visible ? projetar(disco.position.x, disco.position.y, disco.position.z) : null;
@@ -1496,7 +1536,7 @@ export function criarCena({ container, predio, unidades, teste = false,
     renderer, stats, controls, camera, irVista, focarAndar, marcarUnidade, setFiltro, pedirRender, limparSelecao,
     iniciarSol, setSol, desligarSol, enquadrarSol, emNoite: () => solEstado.noite > 0.5,
     solRef: () => ({ modo: solEstado.modo, ref: solEstado.ref ? Array.from(solEstado.ref) : null }),
-    pontoDaUnidade, pontoDoSol, pontoDoArco, solDebug, setDeslocamento, irParaJanela, voltarDaJanela, medirEnquadramento, luminanciaMedia,
+    pontoDaUnidade, pontoDoSol, pontoDoArco, solDebug, setDeslocamento, irParaJanela, voltarDaJanela, medirEnquadramento, luminanciaMedia, caixaNaTela, estadoCarga,
     // B10: start/stop downloading the Google city seen from inside a unit (card open -> 360 window ready sooner)
     preCarregarJanela: (u) => { preJanela = u; if (gCena) gCena.preCarregar(u); }, pararPreCarga: () => { preJanela = null; if (gCena) gCena.pararPreCarga(); }, // a card opened before Google is up is prefetched when it comes up (08/10)
     // test helper: top-down view over the tower; contorno = red outline of the B5 tower footprint, semPredio hides it
