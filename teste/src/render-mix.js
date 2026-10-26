@@ -101,6 +101,8 @@ uniform float ambSala;
 uniform float pufeNoite;
 uniform vec3 pufeCor;
 uniform float pufeLumP;
+uniform float camaFator;
+uniform float pufeModelo;
 uniform float fatorFora;
 uniform float srgb;
 uniform float veuFora;
@@ -197,20 +199,28 @@ void main(){
   // a lighter navy velvet: its own rendered shading (desaturated, x pufeGanho) + the room's ambient light (mean room
   // luminance ambSala, colour corLuz; the blurred local map was ruled by the black night window) x the lighter albedo pufeAlb
   // 26/10 Victor ('a cor desse puff ta ridicula'): manifest cena.pufe.cor set = the pouf is re-coloured to that albedo (warm
-  // off-white boucle). The render lit it as E x albedo with a very dark navy albedo (luminance pufeLumP): E = lum(x) / pufeLumP,
-  // new colour = pufeCor x E in the colour of the room light. G = the pouf's share of the texel (soft edge, no dark outline).
+  // off-white boucle). The render lit it as E x albedo with a very dark navy albedo (luminance pufeLumP): E = lum(x) / pufeLumP
+  // (by LUMINANCE: the navy's red/green are ~0 and a per-channel ratio would amplify their noise), new colour = pufeCor x E in
+  // the colour of the room light. G = the core of the pouf with a 1-px feather; B (inside the pouf) = 1 on the top face.
+  // 26/10 v2 (Meta: specks along the edge, flat bright front from the balcony at night): no per-texel coverage any more, and the
+  // side faces get a lower knee at night (behind the balcony glass the panel also carries the glass's reflection).
   if (foP.y > 0.0 && modoLum < 0.5 && pufeCor.r > 0.0) {
-    // edge texels: a = pouf coverage (G), r = albedo of what is behind the edge / the pouf's (B, log scale); D = a + (1-a) r
-    float a = foP.y, r = a < 0.999 ? exp(texture2D(tFora, vUv).b * 6.9078) : 1.0, D = a + (1.0 - a) * r;
     float lp = dot(x, vec3(0.2126, 0.7152, 0.0722));
-    vec3 xp = pufeCor * corLuz * (lp / (pufeLumP * D)); // the pouf in the new colour under this texel's light
-    // knee from 1.5 x the room's mean light (0.08..0.45): behind the balcony glass the panel also carries the glass's
-    // reflection, and x 100+ turned it into a white band on the pouf's front at night (varanda, 21:00); edge texels stop AT the
-    // knee (a dark leg or shadow behind the edge gives a small r and a too-bright E: light specks on the outline)
-    // at night (pufeNoite > 1; ambSala >= ALVO there) the cap is 0.16
-    float ks = clamp(1.5 * ambSala, 0.08, mix(0.45, 0.16, clamp((pufeNoite - 1.0) / 0.6, 0.0, 1.0))), lq = dot(xp, vec3(0.2126, 0.7152, 0.0722));
-    if (lq > ks) xp *= (a < 0.999 ? ks : ks + 0.25 * ks * (lq - ks) / (lq - ks + 0.25 * ks)) / lq;
-    x = x * ((1.0 - a) * r / D) + xp * a;
+    vec3 xp = pufeCor * corLuz * (lp / pufeLumP);
+    float noite = clamp((pufeNoite - 1.0) / 0.6, 0.0, 1.0), lado = 1.0 - step(0.5, texture2D(tFora, vUv).b);
+    // knee from 1.5 x the room's mean light (0.08..0.45; 0.16 at night, 0.07 on the sides at night)
+    float ks = clamp(1.5 * ambSala, 0.08, mix(0.45, 0.16, noite)) * mix(1.0, 0.45, lado * noite);
+    float lq = dot(xp, vec3(0.2126, 0.7152, 0.0722));
+    if (lq > ks) xp *= (ks + 0.35 * ks * (lq - ks) / (lq - ks + 0.35 * ks)) / lq;
+    // points that see the pouf THROUGH the balcony glass (manifest cena.pufe.modeloNoite): at night the panel carries the glass's
+    // reflection (x 100+ = flat bright bands); there the pouf is the room's light x its albedo x the face (top 1, sides 0.6)
+    vec3 xm = pufeCor * corLuz * ambSala * 0.35 * mix(1.0, 0.6, lado);
+    xp = mix(xp, xm, noite * pufeModelo);
+    // edge texels (G < 1) mix pouf and rug: lum(x) / pufeLumP there is the RUG's light x 100+; cap at the model (x5 by day)
+    if (foP.y < 0.999) { float lm = dot(xm, vec3(0.2126, 0.7152, 0.0722)) * mix(5.0, 1.6, noite), lx = dot(xp, vec3(0.2126, 0.7152, 0.0722)); if (lx > lm) xp *= lm / lx; }
+    // and the edge counts less (G^2): the pouf's share of an edge texel is unknown; full weight drew a light fringe
+    float gP = foP.y * foP.y;
+    x = mix(x, xp, gP);
   } else if (foP.y > 0.0 && modoLum < 0.5) {
     float lp = dot(x, vec3(0.2126, 0.7152, 0.0722));
     vec3 sh = mix(vec3(lp), x, 0.5) * pufeGanho; // its own shading, as if the albedo were ~pufeGanho x lighter (less violet)
@@ -218,6 +228,10 @@ void main(){
     vec3 xp = sh + pufeAlb * corLuz * ambSala * expo * pufeAmb * pufeNoite;
     x = mix(x, xp, foP.y);
   }
+  // 26/10 (Meta, on Victor's 'cama estourada vista da Entrada'): the bedding (fora.webp BLUE where GREEN = 0; masks by
+  // docs/b10-scripts/gera_mascara_cama.py) is white cloth of albedo ~0.85-0.9 that the tone map squeezed into one cream patch
+  // (the 2 pillows lost into the wall). All its light is scaled by camaFator (= albedo ~0.65): room for the folds and the shade.
+  else if (camaFator < 0.999 && usaFora > 0.5 && modoLum < 0.5) { float cb = texture2D(tFora, vUv).b; x *= mix(1.0, camaFator, cb * (1.0 - clamp((pufeNoite - 1.0) / 0.6, 0.0, 1.0))); } // by day only: at night the spots already model the pillows
   if (modoLum > 0.5) { float l0 = max(dot(x, vec3(0.2126, 0.7152, 0.0722)), 1e-6); float v = clamp((log2(l0) + 16.0) / 20.0, 0.0, 1.0) * 255.0; gl_FragColor = vec4(floor(v) / 255.0, 1.0 - fo, fract(v), 1.0); return; } // 08/10: 16 bits (R hi + B lo) - 8 bits made rings on smooth walls
   if (usaFora > 0.5) x *= mix(1.0, fatorFora, fo); // v4: window exposed on its own
   if (sLoc > 0.0) { vec4 q = texture2D(tLoc, vUv); float r = exp2(clamp((lG - ((q.r + q.b / 255.0) * 20.0 - 16.0)) * sLoc, -1.5, 1.5)); x *= mix(1.0, r, smoothstep(0.05, 0.3, q.g) * (1.0 - fo)); }
@@ -343,7 +357,7 @@ function prepassoAcesa(r, U) {
 }
 
 export class MisturaPonto {
-  constructor(renderer, ponto, base, { larguraMax = 4096, SOL, unidade = null, finalRender = null, luzes = [], pufe = {} } = {}) {
+  constructor(renderer, ponto, base, { larguraMax = 4096, SOL, unidade = null, finalRender = null, luzes = [], pufe = {}, cama = {} } = {}) {
     this.luzesOrdem = luzes; // C8: manifest cena.luzes (order of the sum kept)
     this.r = renderer; this.p = ponto; this.base = base; this.max = larguraMax; this.SOL = SOL;
     this.unidade = unidade; this.finalRender = finalRender; // S2 (15/10): unit being shown + final of the rendered unit
@@ -364,7 +378,7 @@ export class MisturaPonto {
       uniforms: { t: { value: Array(7).fill(PRETO) }, g: { value: Array.from({ length: 7 }, () => new THREE.Vector3()) },
         esc: { value: Array(7).fill(1) }, gama: { value: 2.2 }, ombro: { value: +(new URLSearchParams(location.search).get('ombro')) || 1.1 }, joelho: { value: Array(7).fill(0) }, joelho2: { value: Array(7).fill(0.95) }, gamaL: { value: Array(7).fill(2.2) }, y2: { value: Array(7).fill(2) }, ymax: { value: Array(7).fill(4) }, wb: { value: new THREE.Vector3(1, 1, 1) }, expo: { value: 1 }, srgb: { value: 0 },
         tFora: { value: PRETO }, usaFora: { value: 0 }, pufeGanho: { value: +(new URLSearchParams(location.search).get('pufe')) || pufe.ganho || 0 }, pufeAmb: { value: Number.isFinite(parseFloat(new URLSearchParams(location.search).get('pufeA'))) ? parseFloat(new URLSearchParams(location.search).get('pufeA')) : (pufe.amb ?? 0) },
-        pufeAlb: { value: new THREE.Vector3(...(pufe.albedo || [0, 0, 0])) }, corLuz: { value: new THREE.Vector3(1, 1, 1) }, ambSala: { value: 0 }, pufeNoite: { value: 1 }, pufeCor: { value: new THREE.Vector3(...(pufe.cor || [0, 0, 0])) }, pufeLumP: { value: +(new URLSearchParams(location.search).get('pufeL')) || pufe.lumAntigo || 1 }, /* pufeAlb = sRGB (46, 50, 64) linear */ fatorFora: { value: 1 }, modoLum: { value: 0 }, tLoc: { value: PRETO }, sLoc: { value: 0 }, lG: { value: 0 }, dbR: { value: 14 / w }, loIdx: { value: Array(7).fill(-1) }, semRefl: { value: 0 }, ehLuz: { value: Array(7).fill(0) }, tL0: { value: PRETO }, tL1: { value: PRETO }, tL2: { value: PRETO }, dbT: { value: (new URLSearchParams(location.search).get('deband') === '0' ? 0 : 3) / 255 },
+        pufeAlb: { value: new THREE.Vector3(...(pufe.albedo || [0, 0, 0])) }, corLuz: { value: new THREE.Vector3(1, 1, 1) }, ambSala: { value: 0 }, pufeNoite: { value: 1 }, pufeCor: { value: new THREE.Vector3(...(pufe.cor || [0, 0, 0])) }, pufeLumP: { value: +(new URLSearchParams(location.search).get('pufeL')) || pufe.lumAntigo || 1 }, pufeModelo: { value: (pufe.modeloNoite || []).includes(ponto.id) ? 1 : 0 }, camaFator: { value: +(new URLSearchParams(location.search).get('cama')) || cama.fator || 1 }, /* pufeAlb = sRGB (46, 50, 64) linear */ fatorFora: { value: 1 }, modoLum: { value: 0 }, tLoc: { value: PRETO }, sLoc: { value: 0 }, lG: { value: 0 }, dbR: { value: 14 / w }, loIdx: { value: Array(7).fill(-1) }, semRefl: { value: 0 }, ehLuz: { value: Array(7).fill(0) }, tL0: { value: PRETO }, tL1: { value: PRETO }, tL2: { value: PRETO }, dbT: { value: (new URLSearchParams(location.search).get('deband') === '0' ? 0 : 3) / 255 },
         veuFora: VEU.fora, veuTopo: VEU.topo, veuHoriz: VEU.horiz, tAlb: { value: PRETO }, tNor: { value: PRETO }, tVis: { value: PRETO }, tVis2: { value: PRETO }, nInt: { value: 0 }, usaVis: { value: 0 }, gDir: { value: new THREE.Vector3() },
         solDir: { value: new THREE.Vector3(0, 0, 1) }, tAc: { value: PRETO }, meioMin: { value: 0 }, visTam: { value: new THREE.Vector2(1, 1) }, raioVis: { value: Number.isFinite(parseFloat(new URLSearchParams(location.search).get('visr'))) ? parseFloat(new URLSearchParams(location.search).get('visr')) : (capacidade().nivel === 'topo' ? 2 : 1) }, pesoN: { value: new URLSearchParams(location.search).get('visn') === '0' ? 0 : 1 } }, // ?visr=0 = old look, ?visn=0 = no normal weight (tests)
     });
