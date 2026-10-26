@@ -118,6 +118,7 @@ uniform vec3 pufeCor;
 uniform float pufeLumP;
 uniform float camaFator;
 uniform float pufeModelo;
+uniform float pufeMatiz;
 uniform float corrimao;
 uniform float fatorFora;
 uniform float srgb;
@@ -247,6 +248,9 @@ void main(){
     vec3 sh = mix(vec3(lp), x, 0.5) * pufeGanho; // its own shading, as if the albedo were ~pufeGanho x lighter (less violet)
     sh /= 1.0 + dot(sh, vec3(0.2126, 0.7152, 0.0722)) / 0.12; // soft cap: the lit lower front seen from the balcony went white
     vec3 xp = sh + pufeAlb * corLuz * ambSala * ex * pufeAmb * pufeNoite;
+    // 26/10 Victor ('um puff que muda de cor dependendo do horario'): the amber night light turned the navy pouf brown; keep
+    // its luminance but pull its hue to the navy albedo (pufeMatiz 0 = as rendered, 1 = pure navy hue)
+    { float lx = dot(xp, vec3(0.2126, 0.7152, 0.0722)); vec3 hue = pufeAlb / max(dot(pufeAlb, vec3(0.2126, 0.7152, 0.0722)), 1e-4); xp = mix(xp, lx * hue, pufeMatiz); }
     x = mix(x, xp, foP.y);
   }
   // 26/10 (Meta, on Victor's 'cama estourada vista da Entrada'): the bedding (fora.webp BLUE where GREEN = 0; masks by
@@ -481,7 +485,7 @@ export class MisturaPonto {
       uniforms: { t: { value: Array(7).fill(PRETO) }, g: { value: Array.from({ length: 7 }, () => new THREE.Vector3()) },
         esc: { value: Array(7).fill(1) }, gama: { value: 2.2 }, ombro: { value: +(new URLSearchParams(location.search).get('ombro')) || 1.1 }, joelho: { value: Array(7).fill(0) }, joelho2: { value: Array(7).fill(0.95) }, gamaL: { value: Array(7).fill(2.2) }, y2: { value: Array(7).fill(2) }, ymax: { value: Array(7).fill(4) }, wb: { value: new THREE.Vector3(1, 1, 1) }, expo: { value: 1 }, srgb: { value: 0 },
         tFora: { value: PRETO }, usaFora: { value: 0 }, pufeGanho: { value: +(new URLSearchParams(location.search).get('pufe')) || pufe.ganho || 0 }, pufeAmb: { value: Number.isFinite(parseFloat(new URLSearchParams(location.search).get('pufeA'))) ? parseFloat(new URLSearchParams(location.search).get('pufeA')) : (pufe.amb ?? 0) },
-        pufeAlb: { value: new THREE.Vector3(...(pufe.albedo || [0, 0, 0])) }, corLuz: { value: new THREE.Vector3(1, 1, 1) }, ambSala: { value: 0 }, pufeNoite: { value: 1 }, pufeCor: { value: new THREE.Vector3(...(pufe.cor || [0, 0, 0])) }, pufeLumP: { value: +(new URLSearchParams(location.search).get('pufeL')) || pufe.lumAntigo || 1 }, pufeModelo: { value: (pufe.modeloNoite || []).includes(ponto.id) ? 1 : 0 }, corrimao: { value: new URLSearchParams(location.search).get('corrimao') !== '0' && (corrimao.pontos || []).includes(ponto.id) ? 1 : 0 }, /* ?corrimao=0 = before (tests) */ camaFator: { value: +(new URLSearchParams(location.search).get('cama')) || cama.fator || 1 }, /* pufeAlb = sRGB (46, 50, 64) linear */ fatorFora: { value: 1 }, modoLum: { value: 0 }, tLoc: { value: PRETO }, sLoc: { value: 0 }, lG: { value: 0 }, usaChave: { value: 0 }, chaveT: { value: -4.3 }, kDiaC: { value: 0 }, dbR: { value: 14 / w }, loIdx: { value: Array(7).fill(-1) }, semRefl: { value: 0 }, ehLuz: { value: Array(7).fill(0) }, tL0: { value: PRETO }, tL1: { value: PRETO }, tL2: { value: PRETO }, dbT: { value: (new URLSearchParams(location.search).get('deband') === '0' ? 0 : 3) / 255 },
+        pufeAlb: { value: new THREE.Vector3(...(pufe.albedo || [0, 0, 0])) }, corLuz: { value: new THREE.Vector3(1, 1, 1) }, ambSala: { value: 0 }, pufeNoite: { value: 1 }, pufeCor: { value: new THREE.Vector3(...(pufe.cor || [0, 0, 0])) }, pufeLumP: { value: +(new URLSearchParams(location.search).get('pufeL')) || pufe.lumAntigo || 1 }, pufeModelo: { value: (pufe.modeloNoite || []).includes(ponto.id) ? 1 : 0 }, pufeMatiz: { value: Number.isFinite(parseFloat(new URLSearchParams(location.search).get('pufeM'))) ? parseFloat(new URLSearchParams(location.search).get('pufeM')) : (pufe.matiz ?? 0) }, corrimao: { value: new URLSearchParams(location.search).get('corrimao') !== '0' && (corrimao.pontos || []).includes(ponto.id) ? 1 : 0 }, /* ?corrimao=0 = before (tests) */ camaFator: { value: +(new URLSearchParams(location.search).get('cama')) || cama.fator || 1 }, /* pufeAlb = sRGB (46, 50, 64) linear */ fatorFora: { value: 1 }, modoLum: { value: 0 }, tLoc: { value: PRETO }, sLoc: { value: 0 }, lG: { value: 0 }, usaChave: { value: 0 }, chaveT: { value: -4.3 }, kDiaC: { value: 0 }, dbR: { value: 14 / w }, loIdx: { value: Array(7).fill(-1) }, semRefl: { value: 0 }, ehLuz: { value: Array(7).fill(0) }, tL0: { value: PRETO }, tL1: { value: PRETO }, tL2: { value: PRETO }, dbT: { value: (new URLSearchParams(location.search).get('deband') === '0' ? 0 : 3) / 255 },
         veuFora: VEU.fora, veuTopo: VEU.topo, veuHoriz: VEU.horiz, tAlb: { value: PRETO }, tNor: { value: PRETO }, tVis: { value: PRETO }, tVis2: { value: PRETO }, nInt: { value: 0 }, usaVis: { value: 0 }, gDir: { value: new THREE.Vector3() },
         solDir: { value: new THREE.Vector3(0, 0, 1) }, tAc: { value: PRETO }, meioMin: { value: 0 }, visTam: { value: new THREE.Vector2(1, 1) }, raioVis: { value: Number.isFinite(parseFloat(new URLSearchParams(location.search).get('visr'))) ? parseFloat(new URLSearchParams(location.search).get('visr')) : (capacidade().nivel === 'topo' ? 2 : 1) }, pesoN: { value: new URLSearchParams(location.search).get('visn') === '0' ? 0 : 1 } }, // ?visr=0 = old look, ?visn=0 = no normal weight (tests)
     });
