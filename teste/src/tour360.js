@@ -160,7 +160,7 @@ async function criar({ container, manifesto = 'assets/render/tour360/manifesto.j
     const geo = new THREE.SphereGeometry(RAIO, 96, 48); geo.scale(-1, 1, 1);
     const mat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 1, depthWrite: false, toneMapped: false });
     const m = new THREE.Mesh(geo, mat); m.position.copy(paraMundo(p.pos)); m.visible = false; cena.add(m);
-    const mix = new MisturaPonto(renderer, p, base, { larguraMax, SOL, unidade: final != null && numero != null ? { numero: String(numero), andar, final, torre } : null, finalRender: man.final ?? null, luzes: CENA.luzes, pufe: CENA.pufe, cama: CENA.cama || {} }); // RODADA 26/10: bedding scale
+    const mix = new MisturaPonto(renderer, p, base, { larguraMax, SOL, unidade: final != null && numero != null ? { numero: String(numero), andar, final, torre } : null, finalRender: man.final ?? null, luzes: CENA.luzes, pufe: CENA.pufe, cama: CENA.cama || {}, corrimao: CENA.corrimao || {} }); // RODADA 26/10: bedding scale
     mix.pufeNoiteCena = CENA.pufe && CENA.pufe.noite; // S2: sun of THIS unit
     // 12-bit lamp low bits arrived (render-mix.js). 13/10 Victor (R2, rings at night in the kitchen): when they landed
     // during the walk to this point (estado.ponto still the old one; cached files land in < 600 ms) the repaint was
