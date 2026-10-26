@@ -80,6 +80,7 @@ async function criar({ container, manifesto = 'assets/render/tour360/manifesto.j
   // RODADA 26/10: lamps given by the caller (P1c start parameter &luzes=) win over the visitor's saved choice; the glass
   // reflection starts OFF unless the caller asks for it (Victor: 'sem reflexo'; Sites P1c 22/10 04:31)
   const estado = { estacao, minutos, luzes: { ...(luzes || luzesDoCliente() || luzesAuto(estacao, minutos)) }, ponto: ponto && PTS[ponto] ? ponto : pontoInicial(), reflexo: !!reflexo };
+  if (luzes) guardaLuzesCliente(estado.luzes); // RODADA 26/10 P1c: lamps given at the start stay (a change of hour no longer resets them to the automatic rule)
   let VG = null; // RODADA 26/10 (E0): generated view of the unit's facade, shown only until Google's window is ready (modo 'espera')
   let G = null; // B10 (ON in the published site): live layer with Google Photorealistic 3D Tiles behind the `fora` window mask; null = current behaviour
 

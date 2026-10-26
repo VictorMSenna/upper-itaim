@@ -316,7 +316,9 @@ uniform sampler2D tVis2;
 uniform float nInt;
 uniform float meioMin;
 `
-  + FRAG.slice(FRAG.indexOf('float acesaT('), FRAG.indexOf('// 21/10 SOL-FLUIDO: acesa()'))
+  // 26/10: the end marker is code, not a comment: the anonymous module's build strips // lines (also inside this template),
+  // indexOf gave -1 and the prepass shader took the whole FRAG ('visTam' undeclared): no direct sun in the module since 21/10
+  + FRAG.slice(FRAG.indexOf('float acesaT('), FRAG.indexOf('#ifdef USA_AC', FRAG.indexOf('float acesaT(')))
   + 'void main(){ gl_FragColor = vec4(acesa(vUv), 0.0, 0.0, 1.0); }';
 const AC = new WeakMap();
 function prepassoAcesa(r, U) {
