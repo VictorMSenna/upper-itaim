@@ -22,8 +22,20 @@ export function dniLux(el) {
 export function dhiLux(el) {
   if (el <= -6) return 3;
   if (el <= 0) return 3 + ((el + 6) / 6) * 400;
-  return 400 + 16000 * Math.sin((el * Math.PI) / 180) ** 0.6;
+  // 26/10 UPPER-SOL-FLUIDO (audit E7, meio 17:55 -> 18:00 room -44 of 255 in 5 min): sin(el)^0.6 has an infinite slope at the
+  // horizon (400 lux at 0 deg, 1810 at 1 deg, 3150 at 3): the sky's light fell 4x in the 5 minutes around sunset / sunrise.
+  // Below 6 deg the rise is eased in (smoothstep 0..6 deg): 500 lux at 1 deg, 1780 at 3, the same curve from 6 deg up.
+  const k = el >= 6 ? 1 : (el / 6) * (el / 6) * (3 - el / 3);
+  return 400 + 16000 * Math.sin((el * Math.PI) / 180) ** 0.6 * k;
 }
+// 26/10 UPPER-SOL-FLUIDO (audit E7: spots popping on/off at 05:55 / 18:10, winter 17:30 room near black): the lamps that follow
+// the hour (estado.luzesAuto, manifest cena.luzesNoite) fade with the sun instead of switching at -2 deg: full at <= -8 deg,
+// off at >= +2 deg, 0.5 at -3 deg (where tour360 shows their button ON)
+export function pesoLuzNoite(el) { const e = Number.isFinite(el) ? el : -12, t = Math.min(1, Math.max(0, (e + 8) / 10)); return 1 - t * t * (3 - 2 * t); }
+const FADE = 250, LRU_MAX = 24; // UPPER-SOL-FLUIDO: fade-in (ms) of a layer that lands during a moving sun; decoded layers kept per point
+const QS = typeof location !== 'undefined' ? new URLSearchParams(location.search) : new URLSearchParams('');
+const SOL_ESPERA = QS.get('solespera') === '1'; // tests: every paint waits for its layers again (the old behaviour)
+const MEIA = QS.get('solmeia') !== '0'; // tests: ?solmeia=0 = full-size mix also while the sun moves
 const mix3 = (a, b, k) => a.map((x, i) => x + (b[i] - x) * k);
 // sky / sun colour by elevation (sunset warmer, night blue) — artistic estimate, documented in RELATORIO-B6
 function corCeu(el) { return el > 10 ? [1, 1, 1] : el > -2 ? mix3([1.05, 0.9, 0.85], [1, 1, 1], (el + 2) / 12) : [0.35, 0.45, 0.9]; }
@@ -91,6 +103,9 @@ uniform float modoLum;
 uniform sampler2D tLoc;
 uniform float sLoc;
 uniform float lG;
+uniform float usaChave;
+uniform float chaveT;
+uniform float kDiaC;
 uniform sampler2D tFora;
 uniform float usaFora;
 uniform float pufeGanho;
@@ -186,6 +201,11 @@ vec3 neutral(vec3 c){
 }
 void main(){
   vec3 s = vec3(0.0);
+  // 26/10 UPPER-SOL-FLUIDO: the panorama's exposure key (mean log luminance of the room, lG) is reduced ON THE GPU into row 32 of
+  // tLoc (64 x 33) and applied here: the per-paint CPU readback of that key blocked the main thread (profile of a held sun, PC:
+  // 4.2 of 14 s inside getBufferSubData). Same numbers as the CPU path (chaveDe) it replaces.
+  float ex = expo, lGk = lG;
+  if (usaChave > 0.5) { vec4 kc = texture2D(tLoc, vec2(0.5 / 64.0, 32.5 / 33.0)); if (kc.g > 0.5) { lGk = (kc.r + kc.b / 255.0) * 20.0 - 16.0; ex = expo * exp2(clamp(chaveT - lGk, -1.0, 2.0) * kDiaC); } }
   float foR = semRefl > 0.5 && usaFora > 0.5 ? texture2D(tFora, vUv).r : 0.0; // ITEM 12
   ${[0, 1, 2, 3, 4, 5, 6].map((i) => `if (g[${i}].r + g[${i}].g + g[${i}].b > 0.0) { vec3 c${i} = texture2D(t[${i}], vUv).rgb; if (joelho[${i}] <= 0.0 && dbT > 0.0) c${i} = deband(t[${i}], vUv, c${i});\n#ifdef COM_LO\n  if (loIdx[${i}] > -0.5) { vec3 lo${i} = loIdx[${i}] < 0.5 ? texture2D(tL0, vUv).rgb : (loIdx[${i}] < 1.5 ? texture2D(tL1, vUv).rgb : texture2D(tL2, vUv).rgb); c${i} = c${i} * (4080.0 / 4095.0) + lo${i} * (15.0 / 4095.0); }\n#endif\n  s += g[${i}] * esc[${i}] * decod(c${i}, joelho[${i}], joelho2[${i}], y2[${i}], ymax[${i}], gamaL[${i}]) * (1.0 - ehLuz[${i}] * foR); }`).join('\n  ')}
   if (usaVis > 0.5) {
@@ -193,7 +213,7 @@ void main(){
     vec3 n = normalize(texture2D(tNor, vUv).rgb * 2.0 - 1.0);
     s += gDir * alb * max(dot(n, solDir), 0.0) * visSol(vUv);
   }
-  vec3 x = s * wb * expo;
+  vec3 x = s * wb * ex;
   vec2 foP = usaFora > 0.5 ? texture2D(tFora, vUv).rg : vec2(0.0);
   float fo = foP.x;
   // 13/10 Victor (R4: "o pufe e um bloco preto, nao da para distinguir a forma"): the pouf pixels (fora.webp GREEN) are given
@@ -226,7 +246,7 @@ void main(){
     float lp = dot(x, vec3(0.2126, 0.7152, 0.0722));
     vec3 sh = mix(vec3(lp), x, 0.5) * pufeGanho; // its own shading, as if the albedo were ~pufeGanho x lighter (less violet)
     sh /= 1.0 + dot(sh, vec3(0.2126, 0.7152, 0.0722)) / 0.12; // soft cap: the lit lower front seen from the balcony went white
-    vec3 xp = sh + pufeAlb * corLuz * ambSala * expo * pufeAmb * pufeNoite;
+    vec3 xp = sh + pufeAlb * corLuz * ambSala * ex * pufeAmb * pufeNoite;
     x = mix(x, xp, foP.y);
   }
   // 26/10 (Meta, on Victor's 'cama estourada vista da Entrada'): the bedding (fora.webp BLUE where GREEN = 0; masks by
@@ -239,7 +259,7 @@ void main(){
   else if (corrimao > 0.5 && usaFora > 0.5 && modoLum < 0.5) { float cr = texture2D(tFora, vUv).b; if (cr > 0.0) x = mix(x, dot(x, vec3(0.2126, 0.7152, 0.0722)) * 0.85 * corLuz, cr); }
   if (modoLum > 0.5) { float l0 = max(dot(x, vec3(0.2126, 0.7152, 0.0722)), 1e-6); float v = clamp((log2(l0) + 16.0) / 20.0, 0.0, 1.0) * 255.0; gl_FragColor = vec4(floor(v) / 255.0, 1.0 - fo, fract(v), 1.0); return; } // 08/10: 16 bits (R hi + B lo) - 8 bits made rings on smooth walls
   if (usaFora > 0.5) x *= mix(1.0, fatorFora, fo); // v4: window exposed on its own
-  if (sLoc > 0.0) { vec4 q = texture2D(tLoc, vUv); float r = exp2(clamp((lG - ((q.r + q.b / 255.0) * 20.0 - 16.0)) * sLoc, -1.5, 1.5)); x *= mix(1.0, r, smoothstep(0.05, 0.3, q.g) * (1.0 - fo)); }
+  if (sLoc > 0.0) { vec4 q = texture2D(tLoc, usaChave > 0.5 ? vec2(vUv.x, min(vUv.y * 32.0, 31.5) / 33.0) : vUv); float r = exp2(clamp((lGk - ((q.r + q.b / 255.0) * 20.0 - 16.0)) * sLoc, -1.5, 1.5)); x *= mix(1.0, r, smoothstep(0.05, 0.3, q.g) * (1.0 - fo)); }
   float l = dot(x, vec3(0.2126, 0.7152, 0.0722));
   x *= (1.0 + 1.0 / ombro) / (1.0 + l / ombro);   // soft highlight roll-off; 08/10 Victor: white bed blown in daylight -> stronger shoulder (1.1)
   vec3 o = neutral(x);
@@ -253,10 +273,34 @@ void main(){
 // which some browsers ignore or do badly; fallback <img>.decode()); if the layer is wider than `max`, downscale on a
 // canvas with high-quality smoothing; mipmaps on (trilinear minification). INFO is shown by ?debug360=1.
 export const INFO = { tamanhos: new Set(), decodificador: null };
-async function carregaTextura(url, max, dados = false, manterImagem = false, inteira = false) {
+// 26/10 UPPER-SOL-FLUIDO (audit E10: dotted, jagged fringe where the generated view / Google's city meets the frame and the railing
+// top): the 'fora' mask's edge row is irregular (0 / 64 / 127 / 128 alternating), and the overlays draw with that value as alpha.
+// Once per point, on load: R = window when > 32/255, then a 3x3 box (a regular 1-texel ramp; posts of 3-5 texels keep their
+// width); G and B (pouf, bedding, railing top) untouched. A canvas, so Google's window finder still draws it. ?mascara=0 = raw.
+const MASCARA = QS.get('mascara') !== '0';
+function mascaraRegular(fonte) {
+  try {
+    const W = fonte.width, H = fonte.height, c = document.createElement('canvas'); c.width = W; c.height = H;
+    const g = c.getContext('2d', { willReadFrequently: true }); g.drawImage(fonte, 0, 0);
+    const im = g.getImageData(0, 0, W, H), d = im.data, b = new Uint8Array(W * H), h = new Uint8Array(W * H);
+    for (let i = 0; i < W * H; i++) b[i] = d[i * 4] > 32 ? 1 : 0;
+    for (let y = 0; y < H; y++) { const o = y * W; for (let x = 0; x < W; x++) h[o + x] = b[o + (x ? x - 1 : W - 1)] + b[o + x] + b[o + (x < W - 1 ? x + 1 : 0)]; }
+    for (let y = 0; y < H; y++) { const o = y * W, a = (y ? y - 1 : 0) * W, z = (y < H - 1 ? y + 1 : y) * W; for (let x = 0; x < W; x++) d[(o + x) * 4] = Math.round(((h[a + x] + h[o + x] + h[z + x]) * 255) / 9); }
+    g.putImageData(im, 0, 0);
+    if (fonte.close) fonte.close();
+    return c;
+  } catch (e) { return fonte; }
+}
+async function carregaTextura(url, max, dados = false, manterImagem = false, inteira = false, reduzida = false) {
   if (inteira) max = 0; // lamp layers (knee encoding + dither): an 8-bit canvas resize would re-quantize them into bands
   const blob = await (await fetch(url)).blob();
   let img = null, flipY = false;
+  // 26/10 UPPER-SOL-FLUIDO: a layer kept below its size on purpose (solind, 2:1) is resized while it decodes, off the main thread;
+  // a browser without the resize options takes the full decode + canvas path below
+  if (reduzida && max && !dados) {
+    try { img = await createImageBitmap(blob, { imageOrientation: 'flipY', colorSpaceConversion: 'none', premultiplyAlpha: 'none', resizeWidth: max, resizeHeight: max / 2, resizeQuality: 'high' }); INFO.decodificador = 'createImageBitmap'; }
+    catch (e) { img = null; }
+  }
   if (dados && max && max < 4096) { // (v4 data files are 4096 wide: only lighter tiers decode twice)
     // v4 packed data on a lighter device (src/capacidade.js): NEAREST downscale only ('pixelated' never blends two packed
     // values, so every pixel still decodes to a valid first/last lit minute, at half the spatial resolution)
@@ -282,6 +326,7 @@ async function carregaTextura(url, max, dados = false, manterImagem = false, int
     if (img.close) img.close();
     fonte = c;
   }
+  if (manterImagem && MASCARA) fonte = mascaraRegular(fonte);
   INFO.tamanhos.add(`${fonte.width}x${fonte.height}`);
   const tx = new THREE.Texture(fonte);
   // 08/10 (Victor's M21s blurry: it fell to 2048 when the GPU ran out of memory): the mix samples each layer 1:1 into its
@@ -297,9 +342,11 @@ async function carregaTextura(url, max, dados = false, manterImagem = false, int
   return tx;
 }
 // v4: mean of the direct-sun term at a time of day, linear between the 15-min frames ({"HH:MM": [r,g,b]})
+const MEDIAS = new WeakMap(); // UPPER-SOL-FLUIDO: each table parsed once (was on every paint, 4x)
 function mediaVis(tab, minutos) {
   if (!tab) return null;
-  const ks = Object.keys(tab).map((k) => [+k.slice(0, 2) * 60 + +k.slice(3, 5), tab[k]]).sort((x, y) => x[0] - y[0]);
+  let ks = MEDIAS.get(tab);
+  if (!ks) { ks = Object.keys(tab).map((k) => [+k.slice(0, 2) * 60 + +k.slice(3, 5), tab[k]]).sort((x, y) => x[0] - y[0]); MEDIAS.set(tab, ks); }
   if (!ks.length) return null;
   if (minutos <= ks[0][0]) return ks[0][1];
   for (let i = 1; i < ks.length; i++) if (minutos <= ks[i][0]) { const f = (minutos - ks[i - 1][0]) / (ks[i][0] - ks[i - 1][0]); return ks[i - 1][1].map((x, j) => x + (ks[i][1][j] - x) * f); }
@@ -340,6 +387,52 @@ uniform float meioMin;
   + FRAG.slice(FRAG.indexOf('float acesaT('), FRAG.indexOf('#ifdef USA_AC', FRAG.indexOf('float acesaT(')))
   + 'void main(){ gl_FragColor = vec4(acesa(vUv), 0.0, 0.0, 1.0); }';
 const AC = new WeakMap();
+// 26/10 UPPER-SOL-FLUIDO (audit E10: jagged fringe with white / blue dots along the window frame and the railing top, behind the
+// generated view or Google's city): the render's window light bleeds 2-3 texels into the frame (rows of 100-250 next to a frame
+// of ~55) and the 'fora' mask's edge row is irregular (0 / 64 / 127 / 128). The overlay (mask x its view) then lets that bright
+// rim through in dots. This pass, after the mix, gives the texels on the window edge and up to 2 texels outside it the colour
+// of the frame 4 texels further out (along the mask gradient), only when that is darker and outside the window: thin posts
+// between two windows (3-5 texels, entrada) keep theirs. OFF by default (?borda=1 = on): measured 26/10 it turned the railing
+// edge into dark 4-texel blocks where our render's city shows in the window (viewer with ?google3d=0) and into a dark wavy line
+// at the varanda railing top under the generated view; the regular mask below is what stays on.
+const BORDA = QS.get('borda') === '1';
+const FRAG_BORDA = `precision highp float;
+varying vec2 vUv;
+uniform sampler2D tP;
+uniform sampler2D tF;
+uniform vec2 px;
+float R(vec2 o){ return texture2D(tF, vUv + o * px).r; }
+void main(){
+  vec4 c = texture2D(tP, vUv);
+  if (R(vec2(0.0)) < 0.996) {
+    float a = R(vec2(1.0, 0.0)), b = R(vec2(-1.0, 0.0)), e = R(vec2(0.0, 1.0)), d = R(vec2(0.0, -1.0));
+    float a2 = R(vec2(2.0, 0.0)), b2 = R(vec2(-2.0, 0.0)), e2 = R(vec2(0.0, 2.0)), d2 = R(vec2(0.0, -2.0));
+    if (max(max(max(a, b), max(e, d)), max(max(a2, b2), max(e2, d2))) > 0.5) {
+      vec2 g = vec2(a + 2.0 * a2 - b - 2.0 * b2, e + 2.0 * e2 - d - 2.0 * d2);
+      if (dot(g, g) > 1e-4) {
+        vec2 q = vUv - normalize(g) * 4.0 * px;
+        vec4 f = texture2D(tP, q);
+        vec3 L = vec3(0.2126, 0.7152, 0.0722);
+        if (texture2D(tF, q).r < 0.02 && dot(f.rgb, L) < dot(c.rgb, L)) c = f;
+      }
+    }
+  }
+  gl_FragColor = c;
+}`;
+const BRUTO = new WeakMap(); // per renderer: scratch target the mix is drawn into before the edge pass (one paint at a time)
+function passoBorda(r, alvo, tF) {
+  let b = BRUTO.get(r);
+  if (!b) {
+    const mat = new THREE.ShaderMaterial({ vertexShader: VERT, fragmentShader: FRAG_BORDA, depthTest: false, depthWrite: false, uniforms: { tP: { value: PRETO }, tF: { value: PRETO }, px: { value: new THREE.Vector2(1, 1) } } });
+    const cena = new THREE.Scene(); cena.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), mat));
+    b = { mat, cena, cam: new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1), rts: new Map() };
+    BRUTO.set(r, b);
+  }
+  const k = `${alvo.width}x${alvo.height}x${alvo.texture.type}x${alvo.texture.colorSpace}`;
+  let rt = b.rts.get(k);
+  if (!rt) { rt = new THREE.WebGLRenderTarget(alvo.width, alvo.height, { type: alvo.texture.type, depthBuffer: false, generateMipmaps: false }); rt.texture.colorSpace = alvo.texture.colorSpace; b.rts.set(k, rt); }
+  return { rt, aplica: () => { const U = b.mat.uniforms; U.tP.value = rt.texture; U.tF.value = tF; U.px.value.set(1 / (tF.userData.w || 4096), 1 / (tF.userData.h || 2048)); r.setRenderTarget(alvo); r.render(b.cena, b.cam); } };
+}
 function prepassoAcesa(r, U) {
   let a = AC.get(r);
   if (!a) {
@@ -367,6 +460,11 @@ export class MisturaPonto {
     this.r = renderer; this.p = ponto; this.base = base; this.max = larguraMax; this.SOL = SOL;
     this.unidade = unidade; this.finalRender = finalRender; // S2 (15/10): unit being shown + final of the rendered unit
     this.cache = new Map();
+    // 26/10 UPPER-SOL-FLUIDO: the hourly indirect-sun layers (solind) are decoded at half width (2048 x 1024 = 8 MB of GPU memory
+    // instead of 32; decode + upload ~4x faster), so the season's hours fit next to the fixed layers. Checked on the sharpest
+    // solind detail (sunlit curtain folds, meio 14:00): 2048 = no visible change at 1:1, 1024 = blurred folds. ?solindmax=4096 = full
+    const qi = +QS.get('solindmax');
+    this.maxInd = Math.min(larguraMax, qi > 0 ? qi : 2048);
     const w = Math.min(larguraMax, ponto.largura || 4096);
     const gl = renderer.getContext();
     const half = renderer.capabilities.isWebGL2 && (gl.getExtension('EXT_color_buffer_float') || gl.getExtension('EXT_color_buffer_half_float'));
@@ -383,7 +481,7 @@ export class MisturaPonto {
       uniforms: { t: { value: Array(7).fill(PRETO) }, g: { value: Array.from({ length: 7 }, () => new THREE.Vector3()) },
         esc: { value: Array(7).fill(1) }, gama: { value: 2.2 }, ombro: { value: +(new URLSearchParams(location.search).get('ombro')) || 1.1 }, joelho: { value: Array(7).fill(0) }, joelho2: { value: Array(7).fill(0.95) }, gamaL: { value: Array(7).fill(2.2) }, y2: { value: Array(7).fill(2) }, ymax: { value: Array(7).fill(4) }, wb: { value: new THREE.Vector3(1, 1, 1) }, expo: { value: 1 }, srgb: { value: 0 },
         tFora: { value: PRETO }, usaFora: { value: 0 }, pufeGanho: { value: +(new URLSearchParams(location.search).get('pufe')) || pufe.ganho || 0 }, pufeAmb: { value: Number.isFinite(parseFloat(new URLSearchParams(location.search).get('pufeA'))) ? parseFloat(new URLSearchParams(location.search).get('pufeA')) : (pufe.amb ?? 0) },
-        pufeAlb: { value: new THREE.Vector3(...(pufe.albedo || [0, 0, 0])) }, corLuz: { value: new THREE.Vector3(1, 1, 1) }, ambSala: { value: 0 }, pufeNoite: { value: 1 }, pufeCor: { value: new THREE.Vector3(...(pufe.cor || [0, 0, 0])) }, pufeLumP: { value: +(new URLSearchParams(location.search).get('pufeL')) || pufe.lumAntigo || 1 }, pufeModelo: { value: (pufe.modeloNoite || []).includes(ponto.id) ? 1 : 0 }, corrimao: { value: new URLSearchParams(location.search).get('corrimao') !== '0' && (corrimao.pontos || []).includes(ponto.id) ? 1 : 0 }, /* ?corrimao=0 = before (tests) */ camaFator: { value: +(new URLSearchParams(location.search).get('cama')) || cama.fator || 1 }, /* pufeAlb = sRGB (46, 50, 64) linear */ fatorFora: { value: 1 }, modoLum: { value: 0 }, tLoc: { value: PRETO }, sLoc: { value: 0 }, lG: { value: 0 }, dbR: { value: 14 / w }, loIdx: { value: Array(7).fill(-1) }, semRefl: { value: 0 }, ehLuz: { value: Array(7).fill(0) }, tL0: { value: PRETO }, tL1: { value: PRETO }, tL2: { value: PRETO }, dbT: { value: (new URLSearchParams(location.search).get('deband') === '0' ? 0 : 3) / 255 },
+        pufeAlb: { value: new THREE.Vector3(...(pufe.albedo || [0, 0, 0])) }, corLuz: { value: new THREE.Vector3(1, 1, 1) }, ambSala: { value: 0 }, pufeNoite: { value: 1 }, pufeCor: { value: new THREE.Vector3(...(pufe.cor || [0, 0, 0])) }, pufeLumP: { value: +(new URLSearchParams(location.search).get('pufeL')) || pufe.lumAntigo || 1 }, pufeModelo: { value: (pufe.modeloNoite || []).includes(ponto.id) ? 1 : 0 }, corrimao: { value: new URLSearchParams(location.search).get('corrimao') !== '0' && (corrimao.pontos || []).includes(ponto.id) ? 1 : 0 }, /* ?corrimao=0 = before (tests) */ camaFator: { value: +(new URLSearchParams(location.search).get('cama')) || cama.fator || 1 }, /* pufeAlb = sRGB (46, 50, 64) linear */ fatorFora: { value: 1 }, modoLum: { value: 0 }, tLoc: { value: PRETO }, sLoc: { value: 0 }, lG: { value: 0 }, usaChave: { value: 0 }, chaveT: { value: -4.3 }, kDiaC: { value: 0 }, dbR: { value: 14 / w }, loIdx: { value: Array(7).fill(-1) }, semRefl: { value: 0 }, ehLuz: { value: Array(7).fill(0) }, tL0: { value: PRETO }, tL1: { value: PRETO }, tL2: { value: PRETO }, dbT: { value: (new URLSearchParams(location.search).get('deband') === '0' ? 0 : 3) / 255 },
         veuFora: VEU.fora, veuTopo: VEU.topo, veuHoriz: VEU.horiz, tAlb: { value: PRETO }, tNor: { value: PRETO }, tVis: { value: PRETO }, tVis2: { value: PRETO }, nInt: { value: 0 }, usaVis: { value: 0 }, gDir: { value: new THREE.Vector3() },
         solDir: { value: new THREE.Vector3(0, 0, 1) }, tAc: { value: PRETO }, meioMin: { value: 0 }, visTam: { value: new THREE.Vector2(1, 1) }, raioVis: { value: Number.isFinite(parseFloat(new URLSearchParams(location.search).get('visr'))) ? parseFloat(new URLSearchParams(location.search).get('visr')) : (capacidade().nivel === 'topo' ? 2 : 1) }, pesoN: { value: new URLSearchParams(location.search).get('visn') === '0' ? 0 : 1 } }, // ?visr=0 = old look, ?visn=0 = no normal weight (tests)
     });
@@ -410,14 +508,76 @@ void main(){
   gl_FragColor = vec4(floor(v) / 255.0, w / wt, fract(v), 1.0);
 }` });
     this.cenaBorra = new THREE.Scene(); this.cenaBorra.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.matBorra));
+    // UPPER-SOL-FLUIDO: rtLoc2 = rtLoc (rows 0-31, copied) + the key in row 32 (weighted mean of rtLoc, same as chaveDe); WebGL2 only
+    // (the async readback that reports the key exists there too). ?chavegpu=0 = the CPU readback of before (tests)
+    this.chaveGPU = renderer.capabilities.isWebGL2 && !!renderer.readRenderTargetPixelsAsync && QS.get('chavegpu') !== '0';
+    if (this.chaveGPU) {
+      this.rtLoc2 = mapa(64, 33);
+      this.matChave = new THREE.ShaderMaterial({ vertexShader: VERT, depthTest: false, depthWrite: false, uniforms: { tL: { value: this.rtLoc.texture } }, fragmentShader: `
+precision highp float; varying vec2 vUv; uniform sampler2D tL;
+void main(){
+  float row = floor(vUv.y * 33.0);
+  if (row < 31.5) { gl_FragColor = texture2D(tL, vec2(vUv.x, (row + 0.5) / 32.0)); return; }
+  float sl = 0.0, sw = 0.0;
+  for (int j = 0; j < 32; j++) { float ca = cos(((float(j) + 0.5) / 32.0 - 0.5) * 3.14159265358979);
+    for (int i = 0; i < 64; i++) { vec4 c = texture2D(tL, (vec2(float(i), float(j)) + 0.5) / vec2(64.0, 32.0)); float w = c.g * ca; sl += ((c.r + c.b / 255.0) * 20.0 - 16.0) * w; sw += w; } }
+  float v = clamp(((sw > 0.0 ? sl / sw : 0.0) + 16.0) / 20.0, 0.0, 1.0) * 255.0;
+  gl_FragColor = vec4(floor(v) / 255.0, sw > 0.0 ? 1.0 : 0.0, fract(v), 1.0);
+}` });
+      this.cenaChave = new THREE.Scene(); this.cenaChave.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.matChave));
+    }
   }
-  textura(rel, dados = false, inteira = false) {
+  textura(rel, dados = false, inteira = false, max = this.max) {
     if (!rel) return Promise.resolve(null);
-    if (!this.cache.has(rel)) this.cache.set(rel, carregaTextura(this.base + rel, this.max, dados, /(^|\/)fora[^/]*$/.test(rel), inteira));
-    // (B1) LRU: keep at most 9 layers of this point in memory (ceu + 2 sun + 3 lights + 3 spare)
+    if (!this.cache.has(rel)) {
+      const v = carregaTextura(this.base + rel, max, dados, /(^|\/)fora[^/]*$/.test(rel), inteira, max < this.max);
+      // 26/10 UPPER-SOL-FLUIDO: the decoded texture rides on its promise (v.tx; v.em = when it landed) so a paint can use what is in
+      // hand without awaiting; it goes to the GPU as soon as it lands (not inside the paint that first needs it); a failed fetch
+      // leaves the cache (the next paint asks again)
+      v.then((t) => { v.tx = t; v.em = performance.now(); if (t && !this.liberado) { try { this.r.initTexture(t); } catch (e) { /* uploaded on first use */ } } },
+        () => { if (this.cache.get(rel) === v) this.cache.delete(rel); });
+      this.cache.set(rel, v);
+    }
+    // (B1) LRU of decoded layers per point (UPPER-SOL-FLUIDO: 24, was 16; the hourly solind layers are 1/4 of the size now)
     const v = this.cache.get(rel); this.cache.delete(rel); this.cache.set(rel, v);
-    while (this.cache.size > 16) { const [k, p] = this.cache.entries().next().value; if (this.emUso && this.emUso.has(k)) break; this.cache.delete(k); p.then((t) => t && t.dispose()); }
+    while (this.cache.size > LRU_MAX) { const [k, p] = this.cache.entries().next().value; if (this.emUso && this.emUso.has(k)) break; this.cache.delete(k); p.then((t) => t && t.dispose()); }
     return v;
+  }
+  // layer already decoded (no request, no LRU touch): its promise (with .tx) or null
+  pronta(rel) { const v = rel && this.cache.get(rel); return v && v.tx ? v : null; }
+  // this unit can have direct sun in this season (same test as fatorSolUnidade; unknown unit = the rendered one = yes)
+  solNaEstacao(estacao) {
+    const u = this.unidade, S = this.SOL;
+    if (!u || !S || !S.finais || u.final == null || this.finalRender == null) return true;
+    const mesma = mesmaFace(S, u, this.finalRender);
+    if (mesma == null) return true;
+    if (!mesma) return false;
+    const ku = S.unidades ? chaveUnidade(S, u) : null;
+    const d = ku != null && S.unidades[ku] && S.unidades[ku].est && S.unidades[ku].est[estacao];
+    return !!(d && d.cv && d.cv.includes('1'));
+  }
+  // 26/10 UPPER-SOL-FLUIDO (audit E1: nothing was fetched before a paint needed it): after every paint, fetch + decode + upload
+  // what the next seconds of a held / dragged sun will ask for: the indirect hours around the clock (2 ahead: the bar runs
+  // 1 h/s; 1 behind: a drag goes back), the direct-sun data of the season when this unit can have sun, and the lamps that
+  // light up by themselves at dusk (cena.luzesNoite) once the sun is below 10 deg
+  _prever(estado) {
+    if (this.liberado) return;
+    const C = this.p.camadas, est = estado.estacao, m = estado.minutos;
+    const v4 = !!(C.solvis && C.solvis[est] && C.albedo && C.normal && C.solind && C.solind[est]);
+    const sol = ((v4 ? C.solind : C.sol) && (v4 ? C.solind : C.sol)[est]) || {};
+    const horas = Object.keys(sol).map((k) => [+k.slice(0, 2) * 60 + +k.slice(3, 5), sol[k]]).sort((x, y) => x[0] - y[0]);
+    let el = -12; try { const s = solNoInstante(this.SOL, est, m); if (Number.isFinite(s.el)) el = s.el; } catch (e) { /* no sun data */ }
+    if (this.solNaEstacao(est)) {
+      const i = horas.findIndex((h) => h[0] > m), j0 = i < 0 ? horas.length - 1 : i - 1;
+      for (let j = j0; j <= j0 + 3; j++) if (j >= 0 && j < horas.length && horas[j][1].arq) this.textura(horas[j][1].arq, false, false, v4 ? this.maxInd : this.max);
+      if (v4) { this.textura(C.albedo.arq); this.textura(C.normal.arq); for (const a of [].concat(C.solvis[est].arq)) this.textura(a, true); }
+    }
+    if (el < 10) for (const k of this.luzesNoite || []) if (C[k] && C[k].arq) { this.textura(C[k].arq, false, !!C[k].joelho); if (C[k].lo && this.comLo) this.textura(C[k].lo, false, true); }
+  }
+  // half-size target for the paints made while the sun moves (UPPER-SOL-FLUIDO)
+  rtMeia() {
+    if (!this._rtMeia) { const w = this.rt.width / 2; this._rtMeia = new THREE.WebGLRenderTarget(w, w / 2, { type: this.rt.texture.type, depthBuffer: false, generateMipmaps: false }); this._rtMeia.texture.colorSpace = this.rt.texture.colorSpace; }
+    return this._rtMeia;
   }
   // (B1) free the layer textures of a point the visitor left (GPU memory); the mixed render target stays
   // 21/10 MANCHAS-360: queued behind a paint in flight (it was freeing the layers of a paint that was still mixing them)
@@ -465,7 +625,8 @@ void main(){
     if (!u || !S || !S.finais || this.finalRender == null) return false;
     return mesmaFace(S, u, this.finalRender) === false;
   }
-  plano({ estacao, minutos, luzes }) {
+  // UPPER-SOL-FLUIDO: disp(arq) = 0..1 how much of a layer is in hand (null = all of them: the paint awaited its layers)
+  plano({ estacao, minutos, luzes, luzesAuto }, disp = null) {
     const s = solNoInstante(this.SOL, estacao, minutos);
     const fSol = this.fatorSolUnidade(estacao, minutos); // S2
     const C = this.p.camadas;
@@ -494,10 +655,35 @@ void main(){
       const entre = ant !== undefined && pos !== undefined && pos - ant <= (v4 ? 150 : 120);
       const fa = entre ? (pos - minutos) / (pos - ant) : ant !== undefined ? Math.max(0, 1 - (minutos - ant) / 60) : 0;
       const fb = entre ? 1 - fa : pos !== undefined ? Math.max(0, 1 - (pos - minutos) / 60) : 0;
-      if (fa > 0) lista.push({ c: sol[nome(ant)], g: cs.map((x) => x * gs * fa) });
-      if (fb > 0) lista.push({ c: sol[nome(pos)], g: cs.map((x) => x * gs * fb) });
+      if (fa > 0) lista.push({ c: sol[nome(ant)], g: cs.map((x) => x * gs * fa), hora: ant, f: fa, ind: v4 });
+      if (fb > 0) lista.push({ c: sol[nome(pos)], g: cs.map((x) => x * gs * fb), hora: pos, f: fb, ind: v4 });
     }
-    for (const k of this.luzesOrdem) if (luzes && luzes[k] && C[k]) lista.push({ c: C[k], g: [1, 1, 1], luz: true });
+    const wAuto = pesoLuzNoite(el); // E7
+    for (const k of this.luzesOrdem) {
+      if (!C[k]) continue;
+      const w = luzesAuto && (this.luzesNoite || []).includes(k) ? wAuto : (luzes && luzes[k] ? 1 : 0);
+      if (w > 0) lista.push({ c: C[k], g: [w, w, w], luz: true });
+    }
+    let parcial = false;
+    if (disp) {
+      // direct sun: its 4 data layers or none of it
+      if (dir) { const a = Math.min(...[C.albedo.arq, C.normal.arq, ...[].concat(dir.vis.arq)].map(disp)); if (a < 1) parcial = true; dir = a > 0 ? { ...dir, g: dir.g.map((x) => x * a) } : null; }
+      // indirect sun: the weight of an hour not in hand goes to the hour in hand; neither -> the nearest decoded hour (<= 2 h)
+      const ind = lista.filter((it) => it.hora !== undefined);
+      if (ind.length) {
+        const tot = ind.reduce((t, it) => t + it.f, 0), tem = ind.map((it) => it.f * disp(it.c.arq)), som = tem.reduce((t, x) => t + x, 0);
+        if (som < tot - 1e-6) parcial = true;
+        ind.forEach((it, i) => { const k = som > 1e-6 ? (tem[i] / som) * (tot / it.f) : 0; it.g = it.g.map((x) => x * k); });
+        if (som <= 1e-6) {
+          let h = null;
+          for (const m of horas) if (Math.abs(m - minutos) <= 120 && disp(sol[nome(m)].arq) >= 1 && (h === null || Math.abs(m - minutos) < Math.abs(h - minutos))) h = m;
+          if (h !== null) lista.push({ c: sol[nome(h)], g: cs.map((x) => x * gs * tot), hora: h, f: tot, ind: v4 });
+        }
+      }
+      // sky / lamps not in hand (yet) count 0
+      for (const it of lista) if (it.hora === undefined) { const a = disp(it.c.arq); if (a < 1) { parcial = true; it.g = it.g.map((x) => x * a); } }
+      for (let i = lista.length - 1; i >= 0; i--) if (!(lista[i].g[0] + lista[i].g[1] + lista[i].g[2] > 0)) lista.splice(i, 1);
+    }
     const media = [0, 0, 0];
     for (const it of lista) for (let i = 0; i < 3; i++) media[i] += it.g[i] * it.c.media[i];
     // v4: separate interior / exterior means (when every layer has them)
@@ -510,20 +696,47 @@ void main(){
       if (dir && md && mf) { const a = mediaVis(md, minutos), b = mediaVis(mf, minutos); for (let i = 0; i < 3; i++) { mDentro[i] += dir.g[i] * a[i]; mFora[i] += dir.g[i] * b[i]; mDia[i] += dir.g[i] * a[i]; } }
     }
     if (dir && dir.media) for (let i = 0; i < 3; i++) media[i] += dir.g[i] * dir.media[i];
-    return { lista: lista.slice(0, 7), media, mDentro, mFora, mDia, sol: s, dir, minutos, fSol };
+    return { lista: lista.slice(0, 7), media, mDentro, mFora, mDia, sol: s, dir, minutos, fSol, parcial };
   }
   async _atualizar(estado) {
     if (this.liberado) return null;
     const usado = MisturaPonto.estadoDe(estado, this.luzesOrdem); // snapshot taken with the plan below (same tick)
-    const pl = this.plano(estado);
-    this.emUso = new Set(pl.lista.map((it) => it.c.arq));
     const C = this.p.camadas;
-    const visArq = pl.dir ? [].concat(pl.dir.vis.arq) : [];
-    const tDir = pl.dir ? await Promise.all([this.textura(C.albedo.arq), this.textura(C.normal.arq), ...visArq.map((a) => this.textura(a, true))]) : null;
-    if (pl.dir) for (const a of [C.albedo.arq, C.normal.arq, ...visArq]) this.emUso.add(a);
+    // 26/10 UPPER-SOL-FLUIDO (Victor 26/10 ~14:05: 'essa sombra do sol ainda ta muito travadinha e ela enguica em varios pontos';
+    // audit E1: holding the sun, the picture froze 0.2-4.2 s at every hour boundary and at the first direct sun while the clock
+    // ran on, then jumped 20-250 min). Every paint AWAITED the next hour's indirect layer and the first direct-sun layers
+    // (download + decode + upload). A paint that continues the previous picture of this point (same season, <= 60 min away:
+    // the sun bar held or dragged) no longer waits: it uses the layers in hand (plano with disp), asks for the missing ones,
+    // repaints when they land and fades them in over FADE ms. Jumps (another season, a tap far away, the first picture of a
+    // point, a context restore) still wait, as before. _prever fetches the next layers before they are needed.
+    const ult = this.ultimo && this.ultimo.estado, dM = ult ? Math.abs(ult.minutos - usado.minutos) : 1e9;
+    const segue = !SOL_ESPERA && !!ult && ult.estacao === usado.estacao && Math.min(dM, 1440 - dM) <= 60 && [C.ceu, C.fora].every((c) => !c || this.pronta(c.arq));
+    const agora = performance.now();
+    let emFade = false;
+    const disp = (arq) => { const v = this.pronta(arq); if (!v) return 0; if (v.usada) return 1;
+      const t = Math.min(1, Math.max(0, (agora - v.em) / FADE)); if (t >= 1) { v.usada = true; return 1; } emFade = true; return t * t * (3 - 2 * t); };
+    const cheio = this.plano(estado); // every layer the picture wants
+    const visArq = cheio.dir ? [].concat(cheio.dir.vis.arq) : [];
+    const pede = (it) => this.textura(it.c.arq, false, !!it.c.joelho, it.ind ? this.maxInd : this.max);
+    this.emUso = new Set(cheio.lista.map((it) => it.c.arq));
+    if (cheio.dir) for (const a of [C.albedo.arq, C.normal.arq, ...visArq]) this.emUso.add(a);
+    const pTx = cheio.lista.map(pede);
+    const pDir = cheio.dir ? [this.textura(C.albedo.arq), this.textura(C.normal.arq), ...visArq.map((a) => this.textura(a, true))] : [];
+    let pl, tx, tDir;
+    if (!segue) {
+      tDir = cheio.dir ? await Promise.all(pDir) : null;
+      tx = await Promise.all(pTx);
+      for (const p of [...pTx, ...pDir]) p.usada = true; // shown at full weight: never faded later
+      pl = cheio;
+    } else {
+      for (const p of [...pTx, ...pDir]) if (!p.tx && !p.aviso) { p.aviso = true; p.then(() => { if (!this.liberado && this.aoRefinar) this.aoRefinar(); }, () => {}); }
+      pl = this.plano(estado, disp);
+      for (const it of pl.lista) this.emUso.add(it.c.arq); // a stand-in hour too
+      tx = pl.lista.map((it) => (this.pronta(it.c.arq) || {}).tx || null);
+      tDir = pl.dir ? [C.albedo.arq, C.normal.arq, ...visArq].map((a) => this.pronta(a).tx) : null;
+    }
     for (const it of pl.lista) if (it.c.lo && this.comLo) this.emUso.add(it.c.lo);
     const loP = pl.lista.map((it) => (it.c.lo && this.comLo ? this.textura(it.c.lo, false, true) : null));
-    const tx = await Promise.all(pl.lista.map((it) => this.textura(it.c.arq, false, !!it.c.joelho)));
     // low bits already here = used now; still downloading = this picture goes out at 8 bits and is redrawn when they land
     const txLo = await Promise.all(loP.map((p) => (p ? Promise.race([p, Promise.resolve(undefined)]) : null)));
     if (this.liberado) return null;
@@ -630,11 +843,21 @@ void main(){
     // local adaptation: day strength 0.5, night 0.2 (keeps the mood of the lamps); ?sloc= tests, ?sloc=0 = off
     // 21/10 SOL-FLUIDO: lit fraction per texel once, before the passes that read it (USA_AC programs only)
     if (U.usaVis.value && this.mat.defines.USA_AC !== undefined) { const tac = prepassoAcesa(this.r, U); if (tac) U.tAc.value = tac; }
+    // UPPER-SOL-FLUIDO: while the sun moves (paints of this point < 150 ms apart, continuing the last one) the mix goes to a
+    // half-size target (1/4 of the pixels); 200 ms after the last move the full-size picture is painted again (parcial = the
+    // tour keeps repainting until it is)
+    const tP = performance.now(), movendo = MEIA && segue && this._tPinta !== undefined && tP - this._tPinta < 150; this._tPinta = tP;
     const qs = new URLSearchParams(location.search).get('sloc'), sDia = qs !== null && qs !== '' ? +qs : 0.6;
-    U.sLoc.value = 0;
+    U.sLoc.value = 0; U.usaChave.value = 0;
     if (sDia > 0) {
       U.modoLum.value = 1; this.r.setRenderTarget(this.rtLum); this.r.render(this.cena, this.cam); U.modoLum.value = 0;
       this.r.setRenderTarget(this.rtLoc); this.r.render(this.cenaBorra, this.cam);
+      if (this.chaveGPU) { // UPPER-SOL-FLUIDO: key + exposure on the GPU (see FRAG); reported by an async readback after a still paint
+        this.r.setRenderTarget(this.rtLoc2); this.r.render(this.cenaChave, this.cam);
+        const kq = new URLSearchParams(location.search).get('chave');
+        U.usaChave.value = 1; U.chaveT.value = kq ? +kq : -4.3; U.kDiaC.value = kDia; U.lG.value = 0;
+        U.tLoc.value = this.rtLoc2.texture; U.sLoc.value = sDia * (0.4 + 0.6 * kDia); this._anterior = usado;
+      } else {
       // 21/10 SOL-FLUIDO: the synchronous readback flushed the GPU on every paint (measured: ~10 fps of the 360 while the sun
       // walks). While the sun is moving (a key of this point read < 1.5 s ago) the last key is used and refreshed in the
       // background (readRenderTargetPixelsAsync); a still picture (or a jump: key off by > 0.1 stop) is repainted exact.
@@ -672,13 +895,31 @@ void main(){
       // toward -4.3 (-1..+2 stops), daytime only; night keeps the lamp rule
       const kq = new URLSearchParams(location.search).get('chave'), T = kq ? +kq : -4.3;
       if (sw > 0) U.expo.value = 2 ** (Math.max(-1, Math.min(2, (T - U.lG.value) * 1.0)) * kDia);
+      }
     }
-    this.r.setRenderTarget(this.rt); this.r.render(this.cena, this.cam); this.r.setRenderTarget(null);
-    this.ultimo = { ...pl, expo: K * U.expo.value, lG: U.lG.value + Math.log2(U.expo.value), estado: usado, veu: U.veuFora.value,
+    const alvo = movendo ? this.rtMeia() : this.rt;
+    clearTimeout(this._tmCheio);
+    if (movendo) this._tmCheio = setTimeout(() => { if (!this.liberado && this.aoRefinar) this.aoRefinar(); }, 200);
+    else if (emFade) this._tmCheio = setTimeout(() => { if (!this.liberado && this.aoRefinar) this.aoRefinar(); }, 40);
+    const borda = BORDA && U.usaFora.value > 0.5 && U.tFora.value !== PRETO ? passoBorda(this.r, alvo, U.tFora.value) : null; // E10
+    this.r.setRenderTarget(borda ? borda.rt : alvo); this.r.render(this.cena, this.cam);
+    if (borda) borda.aplica();
+    this.r.setRenderTarget(null);
+    this.ultimo = { ...pl, expo: K * U.expo.value, lG: U.lG.value + Math.log2(U.expo.value), estado: usado, veu: U.veuFora.value, parcial: !!pl.parcial || movendo || emFade, meia: movendo,
       bits12: pl.lista.map((it, i) => (U.loIdx.value[i] >= 0 ? it.c.arq : null)).filter(Boolean), bits8: pl.lista.map((it, i) => (it.c.lo && U.loIdx.value[i] < 0 ? it.c.arq : null)).filter(Boolean) };
-    return this.rt.texture;
+    if (U.usaChave.value) { // the key the GPU used, for api.estado / tests: last known now, exact when the readback lands
+      const u = this.ultimo; u.expo = K * (this._mulChave || 1); u.lG = this._lGChave ?? u.lG;
+      if (!movendo && !this._lendoChave) {
+        this._lendoChave = true; const b = new Uint8Array(4), T = U.chaveT.value, kD = U.kDiaC.value;
+        this.r.readRenderTargetPixelsAsync(this.rtLoc2, 0, 32, 1, 1, b).then(() => {
+          if (b[1] > 127) { const lg = ((b[0] + b[2] / 255) / 255) * 20 - 16, mul = 2 ** (Math.max(-1, Math.min(2, T - lg)) * kD); this._mulChave = mul; this._lGChave = lg + Math.log2(mul); u.expo = K * mul; u.lG = this._lGChave; }
+        }).catch(() => {}).finally(() => { this._lendoChave = false; });
+      }
+    }
+    this._prever(estado);
+    return alvo.texture;
   }
-  liberar() { this.liberado = true; this.rt.dispose(); this.mat.dispose(); this.rtLum.dispose(); this.rtLoc.dispose(); this.matBorra.dispose(); for (const p of this.cache.values()) p.then((t) => t && t.dispose()); }
+  liberar() { this.liberado = true; clearTimeout(this._tmCheio); if (this._rtMeia) this._rtMeia.dispose(); this.rt.dispose(); this.mat.dispose(); this.rtLum.dispose(); this.rtLoc.dispose(); this.matBorra.dispose(); if (this.rtLoc2) { this.rtLoc2.dispose(); this.matChave.dispose(); } for (const p of this.cache.values()) p.then((t) => t && t.dispose()); }
 }
 export let ALVO = 0.30;   // mean-luminance key (tuned on the proof prints; see RELATORIO-B6)
 export function definirAlvo(x) { ALVO = x; }

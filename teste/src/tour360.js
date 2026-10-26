@@ -11,7 +11,7 @@ import { capacidade, rebaixar } from './capacidade.js';
 import { chaveLocal } from './predio.js';
 import * as THREE from 'three';
 import { SOL } from './dados-sol.js';
-import { MisturaPonto, ROTULO, INFO, VEU } from './render-mix.js';
+import { MisturaPonto, ROTULO, INFO, VEU, pesoLuzNoite } from './render-mix.js';
 import { solNoInstante } from './interior-sol.js';
 import { criarVistaGerada } from './vista-gerada.js'; // RODADA 26/10 (E0): placeholder in the window while Google's picture is made
 
@@ -52,7 +52,7 @@ function luzesDoCliente() {
 function guardaLuzesCliente(l) { luzesMemoria = { ...l }; try { sessionStorage.setItem(CHAVE_LUZES, JSON.stringify(luzesMemoria)); } catch (e) { /* memory only */ } }
 function luzesAuto(estacao, minutos) {
   let el = -12; try { const s = solNoInstante(SOL, estacao, minutos); if (Number.isFinite(s.el)) el = s.el; } catch (e) { /* no sun data: night */ }
-  return Object.fromEntries(CENA.luzes.map((k) => [k, el < -2 && CENA.luzesNoite.includes(k)]));
+  return Object.fromEntries(CENA.luzes.map((k) => [k, pesoLuzNoite(el) >= 0.5 && CENA.luzesNoite.includes(k)])); // UPPER-SOL-FLUIDO E7: was el < -2
 }
 
 // 21/10 MANCHAS-360: a lost WebGL context reloads the page one tier down (capacidade.rebaixar). The visit comes back where it was:
@@ -81,6 +81,7 @@ async function criar({ container, manifesto = 'assets/render/tour360/manifesto.j
   // reflection starts OFF unless the caller asks for it (Victor: 'sem reflexo'; Sites P1c 22/10 04:31)
   const estado = { estacao, minutos, luzes: { ...(luzes || luzesDoCliente() || luzesAuto(estacao, minutos)) }, ponto: ponto && PTS[ponto] ? ponto : pontoInicial(), reflexo: !!reflexo };
   if (luzes) guardaLuzesCliente(estado.luzes); // RODADA 26/10 P1c: lamps given at the start stay (a change of hour no longer resets them to the automatic rule)
+  estado.luzesAuto = !luzesDoCliente(); // UPPER-SOL-FLUIDO E7: lamps that follow the hour fade with the sun (render-mix pesoLuzNoite)
   let VG = null; // RODADA 26/10 (E0): generated view of the unit's facade, shown only until Google's window is ready (modo 'espera')
   let G = null; // B10 (ON in the published site): live layer with Google Photorealistic 3D Tiles behind the `fora` window mask; null = current behaviour
 
@@ -168,6 +169,7 @@ async function criar({ container, manifesto = 'assets/render/tour360/manifesto.j
     // MANCHAS-360: 'this point' = the one on screen, i.e. the walk's destination while walking (pontoVisivel)
     mix.aoRefinar = () => { if (fechado) return; if (pontoVisivel() === id) repinta(); else e.refinar = true; };
     mix.refLuz = REF_LUZ; // R1: one fixed night white balance (the white kitchen light) for every point
+    mix.luzesNoite = CENA.luzesNoite; // UPPER-SOL-FLUIDO: lamps faded by the hour (E7) and fetched before dusk
     const e = { m, mix, pronto: null, refinar: false };
     esferas.set(id, e);
     return e;
@@ -183,7 +185,7 @@ async function criar({ container, manifesto = 'assets/render/tour360/manifesto.j
   const pontoVisivel = () => destino || estado.ponto;
   function emDia(e) {
     const u = e.mix.ultimo;
-    if (!u || !u.estado || e.refinar) return false;
+    if (!u || !u.estado || e.refinar || u.parcial) return false; // UPPER-SOL-FLUIDO: parcial = layers still landing / half size while moving
     const s = u.estado;
     return s.estacao === estado.estacao && s.minutos === estado.minutos && u.veu === VEU.fora.value && s.reflexo === (estado.reflexo !== false)
       && CENA.luzes.every((k) => !!s.luzes[k] === !!estado.luzes[k]);
@@ -440,6 +442,7 @@ async function criar({ container, manifesto = 'assets/render/tour360/manifesto.j
         if (alvo === estado.ponto && !andando) { e.m.visible = true; avisoSol(e); }
         desenha();
         if (pendente) continue; // a newer change arrived during this paint: always painted
+        if (e.mix.ultimo && e.mix.ultimo.parcial) break; // UPPER-SOL-FLUIDO: render-mix asks again (aoRefinar) when its layers land
         if (emDia(esfera(pontoVisivel()))) break;
         if (++semPedido >= 3) break; // (never seen) guard against a point that cannot reach the state
       }
@@ -463,8 +466,8 @@ async function criar({ container, manifesto = 'assets/render/tour360/manifesto.j
   // S2 (15/10): another facade than the render's and the card says the balcony has sun now -> say so instead of faking it
   function avisoSol(e) { const a = raiz.querySelector('.t360-aviso-sol'); if (a) a.hidden = !(e.mix.outraFace() && e.mix.cvAgora(estado.estacao, estado.minutos) > 0.5); }
   function marcaLuzes() { raiz.querySelectorAll('[data-luz]').forEach((b) => b.setAttribute('aria-pressed', String(!!estado.luzes[b.dataset.luz]))); }
-  raiz.querySelectorAll('[data-luz]').forEach((b) => b.addEventListener('click', () => { estado.luzes[b.dataset.luz] = !estado.luzes[b.dataset.luz]; guardaLuzesCliente(estado.luzes); marcaLuzes(); repinta(); }));
-  function luzesPelaHora() { if (!luzesDoCliente()) { estado.luzes = luzesAuto(estado.estacao, estado.minutos); marcaLuzes(); } } // D18c: untouched = follow the hour
+  raiz.querySelectorAll('[data-luz]').forEach((b) => b.addEventListener('click', () => { estado.luzes[b.dataset.luz] = !estado.luzes[b.dataset.luz]; estado.luzesAuto = false; guardaLuzesCliente(estado.luzes); marcaLuzes(); repinta(); }));
+  function luzesPelaHora() { if (!luzesDoCliente()) { estado.luzes = luzesAuto(estado.estacao, estado.minutos); estado.luzesAuto = true; marcaLuzes(); } } // D18c: untouched = follow the hour
   let fechado = false;
   function fechar(chamaCb = true) {
     if (fechado) return; fechado = true;
@@ -638,7 +641,7 @@ async function criar({ container, manifesto = 'assets/render/tour360/manifesto.j
   const api = {
     definirHora: (m) => { estado.minutos = m; luzesPelaHora(); return repinta(); },
     definirEstacao: (e) => { estado.estacao = e; luzesPelaHora(); return repinta(); },
-    definirLuz: (n, l) => { estado.luzes[n] = !!l; marcaLuzes(); return repinta(); },
+    definirLuz: (n, l) => { estado.luzes[n] = !!l; estado.luzesAuto = false; marcaLuzes(); return repinta(); },
     irPara,
     olhar: (y, p = 0, f = fov) => { yaw = y; pitch = p; fov = f; aplicaCam(); desenha(); },
     // screen position (CSS px, relative to the canvas) of the floor spots in view, for tests and tooltips

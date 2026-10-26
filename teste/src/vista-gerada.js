@@ -74,7 +74,8 @@ void main(){
   vec3 ceu = mix(ceuHoriz, ceuTopo, smoothstep(0.0, 0.75, el));
   if (usaCeu > 0.5) {   // v2.1: the REAL clouds at every hour, painted per hour (gold rims, pink/orange dusk, dark clouds at night)
     float lonR = atan(r.y, r.x);
-    vec2 uc = vec2((lonR - faixaCeu.x) / (faixaCeu.y - faixaCeu.x), (el - faixaCeu.z) / (faixaCeu.w - faixaCeu.z));
+    float elD = el < 0.11 ? 0.11 + (0.11 - el) * 0.5 : el;   // v4 (Meta review): never read the dome's stretched bottom rows; below 6.3 deg the clouds above are folded down (no flat white band)
+    vec2 uc = vec2((lonR - faixaCeu.x) / (faixaCeu.y - faixaCeu.x), (elD - faixaCeu.z) / (faixaCeu.w - faixaCeu.z));
     vec4 S = texture2D(tCeu, clamp(uc, vec2(0.0005), vec2(0.9995)));
     vec3 cs = lin(S.rgb);
     float ls = dot(cs, vec3(0.2126, 0.7152, 0.0722));
@@ -101,7 +102,7 @@ void main(){
     cc = mix(cc, noite, pesos.w);
     // ALTURA 26/10 (audit E4): the dome's lowest rows are stretched pixel columns ("rain" streaks just above the skyline):
     // below ~6 deg the real clouds fade into the plain gradient of the hour (horizon haze)
-    ceu = mix(mix(ceuHoriz, ceuTopo, smoothstep(0.0, 0.75, el)), cc, smoothstep(0.015, 0.11, el));
+    ceu = mix(mix(ceuHoriz, ceuTopo, smoothstep(0.0, 0.75, el)), cc, 0.45 + 0.55 * smoothstep(0.0, 0.11, el));
   }
   ceu += mix(vec3(0.11, 0.06, 0.028), vec3(0.030, 0.018, 0.009), pesos.w) * kNoite * exp(-max(el, 0.0) / 0.06);   // city glow on the horizon (dim at night)
   vec3 cor = ceu;
@@ -113,6 +114,9 @@ void main(){
     x = mix(vec3(l), x, sat);
     x = 0.18 * pow(max(x, vec3(0.0)) / 0.18, vec3(contraste));
     x = x * (1.0 - escuro) + lin(texture2D(tNoite, uv).rgb) * kNoite;
+    // v4 (Meta review: hard skyline cut; audit E12: flat wall of night dots): aerial perspective - the far city (photo latitude near the
+    // drone's horizon) fades towards the horizon colour of the hour, up to 38 %; at night that dims the far lights
+    x = mix(x, mix(ceuHoriz, ceuTopo, 0.15), 0.38 * smoothstep(-0.075, 0.004, lat));
     cor = mix(ceu, x, B.a);
   }
   float aw = m * forca;
@@ -132,7 +136,9 @@ function filtroDaHora(el, minutos) {
   const ouroM = (1 - tarde) * suave(16, 4, el) * suave(-2, 3, el) * 0.5;      // a softer gold at sunrise
   // dusk: pink horizon, blue sky. ALTURA 26/10: below -7.2 deg (18h30 key) dusk no longer FALLS before night rises (that left up
   // to 58 % of the DAY sky at -10 deg, ~19h); it rises to 1 by -9.5 deg and hands over to night, complete at -15 deg (~19h05)
-  const crep0 = (x) => suave(-13, -3, x) * (1 - suave(-1.5, 3, x));
+  // UPPER-SOL-FLUIDO 26/10 (audit E8: pink dawn -> full daytime clouds in ~10 min, 06:06-06:16 spring): in the MORNING the pink
+  // fades over -1.5..8 deg (~43 min in spring, ~50 in winter) instead of -1.5..3 deg (~20 min); the evening is unchanged
+  const crep0 = (x) => suave(-13, -3, x) * (1 - suave(-1.5, tarde ? 3 : 8, x));
   const crep = el >= -7.2 ? crep0(el) : crep0(-7.2) + (1 - crep0(-7.2)) * suave(-7.2, -9.5, el);
   const noite = 1 - suave(-15, -8, el);
   let tinta = [1.0, 1.0, 1.0];
