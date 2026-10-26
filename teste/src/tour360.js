@@ -632,7 +632,7 @@ async function criar({ container, manifesto = 'assets/render/tour360/manifesto.j
     // current one (tests: docs/b10-scripts/manchas_360.mjs)
     estado: () => { const e = esfera(estado.ponto), u = e.mix.ultimo;
       return { ...estado, luzes: { ...estado.luzes }, yaw, pitch, fov, expo: u?.expo, lG: u?.lG, andando: !!andando,
-        pintado: u && u.estado ? { ...u.estado, luzes: { ...u.estado.luzes }, veu: u.veu, el: u.sol && Number.isFinite(u.sol.el) ? +u.sol.el.toFixed(2) : null } : null, emDia: emDia(e),
+        pintado: u && u.estado ? { ...u.estado, luzes: { ...u.estado.luzes }, veu: u.veu, el: u.sol && Number.isFinite(u.sol.el) ? +u.sol.el.toFixed(2) : null, bits12: u.bits12, bits8: u.bits8 } : null, emDia: emDia(e),
         google: G ? { ...(window.__g3d || {}), ms: G.perf.n ? G.perf.ms / G.perf.n : 0, max: G.perf.max, n: G.perf.n } : null }; },
     fechar: () => fechar(true),
     renderer,

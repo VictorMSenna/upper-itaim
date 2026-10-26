@@ -505,12 +505,18 @@ void main(){
     // 13/10: unused sampler slots kept textures that the LRU / soltarCamadas had disposed; three re-uploaded them from the
     // dropped CPU image ('texSubImage2D: Overload resolution failed' on every repaint). Empty slots now hold PRETO.
     U.tL0.value = U.tL1.value = U.tL2.value = PRETO;
+    // 22/10 MANCHAS-360 (varanda 'ceu' in 12 bits): the shader has only 3 low-bit slots (16 samplers). They go to the layers that
+    // WEIGH most in this picture (gain x mean of the layer inside the room): by day the sky, at night the lamps that are on.
+    // Before: first come, first served in list order (sky first), so with the 12-bit sky the 3rd lamp at night lost its bits.
+    const pesoLo = pl.lista.map((it, i) => { if (!it || !txLo[i]) return -1; const md = it.c.media_dentro || it.c.media || [1, 1, 1];
+      return 0.2126 * it.g[0] * md[0] + 0.7152 * it.g[1] * md[1] + 0.0722 * it.g[2] * md[2]; });
+    const ordemLo = pesoLo.map((w, i) => [w, i]).filter((x) => x[0] >= 0).sort((p, q) => q[0] - p[0]).slice(0, 3).map((x) => x[1]);
     if (!U.usaVis.value) U.tAlb.value = U.tNor.value = U.tVis.value = U.tVis2.value = PRETO;
     for (let i = 0; i < 7; i++) {
       const it = pl.lista[i];
       U.t.value[i] = (it && tx[i]) || PRETO;
       U.loIdx.value[i] = -1;
-      if (it && txLo[i]) { const k = U.loIdx.value.filter((x) => x >= 0).length; if (k < 3) { U['tL' + k].value = txLo[i]; U.loIdx.value[i] = k; } }
+      if (it && txLo[i]) { const k = ordemLo.indexOf(i); if (k >= 0) { U['tL' + k].value = txLo[i]; U.loIdx.value[i] = k; } }
       U.g.value[i].set(...(it ? it.g : [0, 0, 0]));
       U.esc.value[i] = it ? it.c.escala : 1;
       U.ehLuz.value[i] = it && it.luz ? 1 : 0; // ITEM 12
@@ -626,7 +632,8 @@ void main(){
       if (sw > 0) U.expo.value = 2 ** (Math.max(-1, Math.min(2, (T - U.lG.value) * 1.0)) * kDia);
     }
     this.r.setRenderTarget(this.rt); this.r.render(this.cena, this.cam); this.r.setRenderTarget(null);
-    this.ultimo = { ...pl, expo: K * U.expo.value, lG: U.lG.value + Math.log2(U.expo.value), estado: usado, veu: U.veuFora.value };
+    this.ultimo = { ...pl, expo: K * U.expo.value, lG: U.lG.value + Math.log2(U.expo.value), estado: usado, veu: U.veuFora.value,
+      bits12: pl.lista.map((it, i) => (U.loIdx.value[i] >= 0 ? it.c.arq : null)).filter(Boolean), bits8: pl.lista.map((it, i) => (it.c.lo && U.loIdx.value[i] < 0 ? it.c.arq : null)).filter(Boolean) };
     return this.rt.texture;
   }
   liberar() { this.liberado = true; this.rt.dispose(); this.mat.dispose(); this.rtLum.dispose(); this.rtLoc.dispose(); this.matBorra.dispose(); for (const p of this.cache.values()) p.then((t) => t && t.dispose()); }
