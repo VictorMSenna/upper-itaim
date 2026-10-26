@@ -190,7 +190,15 @@ const LUZ_GLSL = `
         //     view (balcony eye, neighbours at 20-80 m) keeps them (uPertoJ = 0).
         jan *= 1.0 - smoothstep(0.08, 0.16, abs(nB.y));
         jan *= 1.0 - smoothstep(0.05, 0.15, length(fwidth(nB)));
-        if (uPertoJ > 0.5) jan *= smoothstep(45.0, 90.0, length(camJ - vB5));
+        // JANELAS-PROXIMAS 26/10 (Meta, Site pub7 79a5d5d, Varanda 21:00: slanted triangle shards on the 2-4 nearest towers). A window
+        // cell is gated fragment by fragment (normal, alignment, grazing angle), and on the fine mesh of a NEAR building each window
+        // spans several Google triangles at different angles, so part of the cell passes and part does not: the lit patch takes the
+        // shape of the triangles. Measured with ?jandist=1 (every gated cell coloured by distance, unit 137): cells cut into wedges on
+        // every wall nearer than ~110 m, still some slivers at 110-150 m (2.5x zoom with a 100-130 m fade), whole rectangles beyond
+        // 150 m (coarser tiles = planar facades). The 360 window view (uPertoJ = 0) now draws no lit window nearer than 150 m, full
+        // from 190 m; the outside view keeps its 45-90 m rule.
+        float dCamJ = length(camJ - vB5);
+        jan *= uPertoJ > 0.5 ? smoothstep(45.0, 90.0, dCamJ) : smoothstep(${typeof location !== 'undefined' && /[?&]janperto=\d+,\d+/.test(location.search) ? location.search.match(/[?&]janperto=(\d+),(\d+)/).slice(1, 3).map((x) => x + '.0').join(', ') : '150.0, 190.0'}, dCamJ); // ?janperto=A,B (tests): other fade distances in metres${typeof location !== 'undefined' && /[?&]jandist=1/.test(location.search) ? ' { float dJ = length(camJ - vB5); outgoingLight = cB * 0.35 + jan * (dJ < 40.0 ? vec3(1.0, 0.0, 0.0) : dJ < 60.0 ? vec3(1.0, 0.5, 0.0) : dJ < 80.0 ? vec3(1.0, 1.0, 0.0) : dJ < 110.0 ? vec3(0.0, 1.0, 0.0) : dJ < 150.0 ? vec3(0.0, 1.0, 1.0) : vec3(0.3, 0.3, 1.0)); cB = vec3(0.0); jan = 0.0; }' : ''} // ?jandist=1 (tests): every window cell that passes the gates, coloured by distance to the camera: red < 40 m, orange < 60, yellow < 80, green < 110, cyan < 150, blue beyond
         float acesa = step(id, uFracG) * jan;
         float lum = dot(cB, vec3(0.2126, 0.7152, 0.0722));
         float vidro = 1.0 - smoothstep(0.18, 0.5, lum);
