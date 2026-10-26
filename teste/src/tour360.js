@@ -13,6 +13,7 @@ import * as THREE from 'three';
 import { SOL } from './dados-sol.js';
 import { MisturaPonto, ROTULO, INFO, VEU } from './render-mix.js';
 import { solNoInstante } from './interior-sol.js';
+import { criarVistaGerada } from './vista-gerada.js'; // RODADA 26/10 (E0): placeholder in the window while Google's picture is made
 
 let atual = null, geracao = 0;
 // 21/10 MANCHAS-360: the tour registers itself as `atual` as soon as its state exists, BEFORE the first paint and Google's
@@ -65,7 +66,7 @@ export function retorno360(numero) {
   return null;
 }
 async function criar({ container, manifesto = 'assets/render/tour360/manifesto.json', ponto, estacao = 'inverno', minutos = 900,
-  luzes = null, aoFechar, teste = false, andar = null, final = null, numero = null, torre = null, registrar = null }) {
+  luzes = null, reflexo = false, aoFechar, teste = false, andar = null, final = null, numero = null, torre = null, registrar = null }) {
   const man = typeof manifesto === 'string' ? await (await fetch(manifesto)).json() : manifesto;
   const base = typeof manifesto === 'string' ? manifesto.replace(/[^/]*$/, '') : (man.base || '');
   const PTS = Object.fromEntries(man.pontos.map((p) => [p.id, p]));
@@ -76,7 +77,10 @@ async function criar({ container, manifesto = 'assets/render/tour360/manifesto.j
   const pontoInicial = () => (man.pontos.find((p) => p.id === CENA.inicio && p.camadas && p.camadas.fora) || man.pontos.find((p) => p.camadas && p.camadas.fora) || man.pontos[0]).id; // Victor 08/10: the tour starts at the entrance
   const volta = numero != null ? retorno360(numero) : null; // MANCHAS-360: back from a context-loss reload
   if (volta) { try { sessionStorage.removeItem(CHAVE_RETORNO); } catch (e) { /* ignore */ } if (!ponto && PTS[volta.ponto]) ponto = volta.ponto; }
-  const estado = { estacao, minutos, luzes: { ...(luzesDoCliente() || luzes || luzesAuto(estacao, minutos)) }, ponto: ponto && PTS[ponto] ? ponto : pontoInicial() };
+  // RODADA 26/10: lamps given by the caller (P1c start parameter &luzes=) win over the visitor's saved choice; the glass
+  // reflection starts OFF unless the caller asks for it (Victor: 'sem reflexo'; Sites P1c 22/10 04:31)
+  const estado = { estacao, minutos, luzes: { ...(luzes || luzesDoCliente() || luzesAuto(estacao, minutos)) }, ponto: ponto && PTS[ponto] ? ponto : pontoInicial(), reflexo: !!reflexo };
+  let VG = null; // RODADA 26/10 (E0): generated view of the unit's facade, shown only until Google's window is ready (modo 'espera')
   let G = null; // B10 (ON in the published site): live layer with Google Photorealistic 3D Tiles behind the `fora` window mask; null = current behaviour
 
   // ---------------------------------------------------------------- DOM
@@ -92,7 +96,7 @@ async function criar({ container, manifesto = 'assets/render/tour360/manifesto.j
     <div class="t360-chips"></div>
     <div class="t360-aviso-sol" hidden>Esta sacada tem sol direto agora; o passeio foi feito num studio de outra face e não mostra esse sol (veja o cartão).</div>`;
   // 08/10 Victor: the city reflected in the balcony glass is nice but sometimes in the way -> on/off, only where there is glass
-  const bR = document.createElement('button'); bR.className = 't360-reflexo'; bR.hidden = true; bR.setAttribute('aria-pressed', 'true');
+  const bR = document.createElement('button'); bR.className = 't360-reflexo'; bR.hidden = true; bR.setAttribute('aria-pressed', 'false');
   bR.innerHTML = '<span class="l-longo">Reflexo no vidro</span><span class="l-curto">Reflexo</span>';
   raiz.querySelector('.t360-luzes').appendChild(bR);
   bR.addEventListener('click', () => { estado.reflexo = estado.reflexo === false; bR.setAttribute('aria-pressed', String(estado.reflexo)); if (G && G.vidro) { G.malha.material.uniforms.usaVidro.value = estado.reflexo ? 1 : 0; G.vista.acordar(); } desenha(); repinta(); }); // ITEM 12: + the lamps' reflection baked in the windows (render-mix semRefl)
@@ -190,6 +194,7 @@ async function criar({ container, manifesto = 'assets/render/tour360/manifesto.j
     if (fechado || !tx) return e;
     e.m.material.map = tx; e.m.material.needsUpdate = true;
     if (id === pontoVisivel()) botaoReflexo();
+    if (VG && id === pontoVisivel()) VG.aposPintar(id, e);
     if (G && id === pontoVisivel()) G.aposPintar(id, e);
     return e;
   }
@@ -200,19 +205,28 @@ async function criar({ container, manifesto = 'assets/render/tour360/manifesto.j
     const c = document.createElement('canvas'); c.width = c.height = 128; const g = c.getContext('2d');
     g.strokeStyle = 'rgba(255,255,255,0.95)'; g.lineWidth = 9; g.beginPath(); g.arc(64, 64, 52, 0, 7); g.stroke();
     g.fillStyle = 'rgba(255,255,255,0.35)'; g.beginPath(); g.arc(64, 64, 40, 0, 7); g.fill();
+    g.strokeStyle = 'rgba(0,0,0,0.38)'; g.lineWidth = 4; g.beginPath(); g.arc(64, 64, 59, 0, 7); g.stroke(); // RODADA 26/10: reads on a white wall too
     const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
   })();
   // MANCHAS-360: the floor rings are rebuilt on every walk; their geometry / material are freed (renderer.info: +1 geometry per
   // 2 walks before, measured with docs/b10-scripts/manchas_360.mjs)
-  function limpaHot() { for (const m of grupoHot.children) { m.geometry.dispose(); m.material.dispose(); } grupoHot.clear(); }
+  function limpaHot() { for (const m of grupoHot.children) { if (!m.isSprite) m.geometry.dispose(); m.material.dispose(); } grupoHot.clear(); } // a Sprite's geometry is three's shared one
+  // RODADA 26/10 item 4 (Victor: 'de cada ponto as outras 2 bolas ficam visiveis sempre'): each neighbour is a ball facing the
+  // camera, drawn on top of everything (behind the glass or a wall too: depthTest off, renderOrder 5) and never smaller than
+  // BOLA_MIN CSS px on screen, however far (the 0.22 m floor ring of before was a thin ellipse a few px tall far away).
+  const BOLA_M = 0.44, BOLA_MIN = 34;
+  function ajustaHot() {
+    const k = 2 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) / (cv.clientHeight || 1); // metres per CSS px at 1 m
+    for (const m of grupoHot.children) m.scale.setScalar(Math.max(BOLA_M, BOLA_MIN * k * camera.position.distanceTo(m.position)));
+  }
   function montaHot() {
     limpaHot();
     const p = PTS[estado.ponto];
     for (const vid of p.vizinhos || []) {
       const q = PTS[vid]; if (!q) continue;
-      const pos = paraMundo([q.pos[0], q.pos[1], 0.02]);
-      const m = new THREE.Mesh(new THREE.CircleGeometry(0.22, 40), new THREE.MeshBasicMaterial({ map: texHot, transparent: true, depthTest: false, toneMapped: false }));
-      m.rotation.x = -Math.PI / 2; m.position.copy(pos); m.userData.id = vid; m.renderOrder = 5;
+      const pos = paraMundo([q.pos[0], q.pos[1], 0.3]);
+      const m = new THREE.Sprite(new THREE.SpriteMaterial({ map: texHot, transparent: true, depthTest: false, depthWrite: false, toneMapped: false }));
+      m.position.copy(pos); m.userData.id = vid; m.renderOrder = 5; m.scale.setScalar(BOLA_M);
       grupoHot.add(m);
     }
   }
@@ -270,7 +284,9 @@ async function criar({ container, manifesto = 'assets/render/tour360/manifesto.j
   // ---------------------------------------------------------------- draw
   const elVista = raiz.querySelector('.t360-vista');
   function desenha() {
+    ajustaHot(); // RODADA 26/10 item 4
     if (G) G.antes();
+    if (VG) VG.antes(camera, estado.ponto, andando, G);
     renderer.render(cena, camera);
     // "Vista simulada" tag anchored outside the balcony (direction +v, slightly up)
     const p = PTS[estado.ponto];
@@ -451,6 +467,7 @@ async function criar({ container, manifesto = 'assets/render/tour360/manifesto.j
   let fechado = false;
   function fechar(chamaCb = true) {
     if (fechado) return; fechado = true;
+    if (VG) { try { VG.liberar(); } catch (e) { /* ignore */ } VG = null; }
     if (G) { try { G.liberar(); } catch (e) { /* ignore */ } G = null; }
     for (const e of esferas.values()) { e.mix.liberar(); e.m.geometry.dispose(); e.m.material.dispose(); }
     renderer.dispose(); raiz.remove(); window.removeEventListener('resize', redim); chipsBox.replaceChildren();
@@ -625,7 +642,8 @@ async function criar({ container, manifesto = 'assets/render/tour360/manifesto.j
     olhar: (y, p = 0, f = fov) => { yaw = y; pitch = p; fov = f; aplicaCam(); desenha(); },
     // screen position (CSS px, relative to the canvas) of the floor spots in view, for tests and tooltips
     hotspots: () => { const r = cv.getBoundingClientRect(); return grupoHot.children.map((m) => { const v = m.position.clone().project(camera);
-      return { id: m.userData.id, x: r.left + (v.x * 0.5 + 0.5) * r.width, y: r.top + (-v.y * 0.5 + 0.5) * r.height, visivel: v.z < 1 && Math.abs(v.x) < 1 && Math.abs(v.y) < 1 }; }); },
+      const px = m.scale.x / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) / (cv.clientHeight || 1) * camera.position.distanceTo(m.position)); // on-screen diameter
+      return { id: m.userData.id, x: r.left + (v.x * 0.5 + 0.5) * r.width, y: r.top + (-v.y * 0.5 + 0.5) * r.height, visivel: v.z < 1 && Math.abs(v.x) < 1 && Math.abs(v.y) < 1, px: Math.round(px) }; }); },
     cursor: () => cv.className,
     chips: () => chipsAtuais.slice(), // D4: neighbours reachable by a chip (rings not tappable from this view)
     // MANCHAS-360: `pintado` = the state the picture on screen was made with (render-mix ultimo.estado) and `emDia` = it is the
@@ -649,6 +667,9 @@ async function criar({ container, manifesto = 'assets/render/tour360/manifesto.j
   // 21/10 SACADA-GOOGLE-JA: from the very first frame the window waits for Google's city with the haze of the hour (no swap of
   // our render's city for Google's); Google starts loading right below (ligaGoogle), with no gesture needed
   VEU.fora.value = /[?&]google3d=0/.test(location.search) ? 0 : 1;
+  if (VEU.fora.value && !/[?&]vistagerada=0/.test(location.search)) criarVistaGerada({ cena, PTS, andar, final, RAIO, modo: 'espera', renderer }).then((v) => { // not awaited: never delays the 360
+    if (!v) return; if (fechado) { v.liberar(); return; } VG = v; raiz.appendChild(v.credito); VG.aposPintar(pontoVisivel(), esfera(pontoVisivel())); desenha();
+  }).catch(() => { VG = null; });
   await repinta(); if (fechado) return alca;
   montaHot(); desenha();
   await ligaGoogle(); if (fechado) return alca;

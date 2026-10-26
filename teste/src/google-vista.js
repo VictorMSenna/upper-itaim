@@ -64,6 +64,9 @@ const FOTO_LADO_W = capacidade().nivel === 'topo' ? 2048 : 1024; // night-window
 const FOTO_MIN = +(typeof location !== 'undefined' && new URLSearchParams(location.search).get('gfmin')) || 99999; // smallest region the splitter goes down to (?gfmin=128 tests)
 const FOTO_MB = (+(typeof location !== 'undefined' && new URLSearchParams(location.search).get('gfmb')) || (capacidade().nivel === 'topo' ? (capacidade().movel ? 900 : 1500) : capacidade().tilesMB)) * 1048576; // iPhone ('ios'): its own budget // mid phones: no raise (M21s crashed at 420, 08/10)
 const FOTO_N = +(typeof location !== 'undefined' && new URLSearchParams(location.search).get('gfn')) || (capacidade().nivel === 'topo' ? 4 : 2); // regions per face side (mid phones: 2x2 at the lower detail)
+// RODADA 26/10 item 1: coarse first pass over every window face (?gfr=0 = off, ?gferr2= its errorTarget)
+const RAPIDO = !(typeof location !== 'undefined' && new URLSearchParams(location.search).get('gfr') === '0');
+const ERRO_RAPIDO = +(typeof location !== 'undefined' && new URLSearchParams(location.search).get('gferr2')) || ERRO_FOTO * 3;
 export const desligadoPorUrl = () => /[?&]google3d=0/.test(location.search);
 async function chaveDaPagina() {
   // 15/10 FILA C6: ?gkey= only on localhost/127.0.0.1 (on the public domain a pasted key in a link is ignored)
@@ -546,12 +549,13 @@ export class VistaGoogle {
       F.dirsVistos = this.dirs;
       const falta = this.facesDaJanela().filter((f) => !F.faces.includes(f)).slice(0, 4 - F.faces.length);
       if (falta.length) {
-        if (F.feito) { F.i = F.faces.length; F.reg = 0; F.fila = null; F.t0 = agora; F.feito = false; this.restauraCache(); const c = this.s.tiles.lruCache; this._guardaCache(); c.minBytesSize = 0; c.unloadPercent = 1; c.maxBytesSize = Math.max(c.maxBytesSize, FOTO_MB); try { localStorage.setItem(chaveLocal('tabela3d-foto-ativa'), String(Date.now())); } catch (e) { /* ignore */ } }
+        if (F.feito) { F.k = F.faces.length; F.reg = 0; F.fila = null; F.t0 = agora; F.feito = false; this.restauraCache(); const c = this.s.tiles.lruCache; this._guardaCache(); c.minBytesSize = 0; c.unloadPercent = 1; c.maxBytesSize = Math.max(c.maxBytesSize, FOTO_MB); try { localStorage.setItem(chaveLocal('tabela3d-foto-ativa'), String(Date.now())); } catch (e) { /* ignore */ } }
+        if (RAPIDO && F.nRapido >= F.faces.length) { F.nRapido = F.faces.length; F.tR0 = agora; F.quietosR = 0; }
         for (const f of falta) { F.faces.push(f); F.alvos.push({ A: alvo(FOTO_LADO), W: alvo(FOTO_LADO_W) }); F.mats.push(new THREE.Matrix4().multiplyMatrices(F.cams[f].projectionMatrix, F.cams[f].matrixWorldInverse)); }
       }
     }
     if (chave !== F.chave) { // new unit: a new picture (our render's city stays in the window meanwhile)
-      F.chave = chave; F.dirsVistos = this.dirs; F.matriz = this.matriz.clone(); F.faces = this.facesDaJanela(); F.i = 0; F.reg = 0; F.t0 = agora; F.feito = false; F.log = []; F.fila = null; F.extras = false; F.fundo = false;
+      F.chave = chave; F.dirsVistos = this.dirs; F.matriz = this.matriz.clone(); F.faces = this.facesDaJanela(); F.k = 0; F.nRapido = RAPIDO ? 0 : 99; F.i = 0; F.tR0 = agora; F.quietosR = 0; F.reg = 0; F.t0 = agora; F.feito = false; F.log = []; F.fila = null; F.extras = false; F.fundo = false;
       // two 2D targets per window face: A = city with neutral light, W = only the lit night windows. The tile shader is linear
       // in (uLuz, uNoiteG): any hour = A x base(hour) + W x lights(hour) in the overlay, no re-shoot when the time changes
       for (const a of F.alvos) { a.A.dispose(); a.W.dispose(); }
@@ -572,10 +576,46 @@ export class VistaGoogle {
       }
       this.acordar(); return;
     }
+    // RODADA 26/10 item 1 (Victor, unit 106 at night on his phone: 'a foto da sacada ta cortada' - Google's city as a rectangle with
+    // straight edges, plain dark-blue haze around it, a diagonal cut at the bottom from 'Porta da varanda'): the window was shown
+    // as soon as the FIRST 90 deg face was shot (21/10) and the other faces (sides, down) arrived one by one, ~1 min on a mid
+    // phone. Now every face of the window is first shot ONCE at low detail (one region per face, ERRO_RAPIDO), the window shows
+    // only when all of them are in (whole opening covered), and the fine regions then replace it in place.
+    if (F.nRapido < F.faces.length) {
+      const L0 = FOTO_LADO, t = this.s.tiles, fr = F.nRapido, base = F.cams[F.faces[fr]];
+      if (!F.selR) F.selR = new THREE.PerspectiveCamera(90, 1, 3, RAIO);
+      const cam = F.selR; cam.quaternion.copy(base.quaternion); cam.position.set(0, 0, 0); cam.up.copy(base.up);
+      cam.clearViewOffset(); cam.updateProjectionMatrix(); cam.updateMatrixWorld(true);
+      this.s.tomar(this, this.s.escena, F.matriz || this.matriz, cam, ERRO_RAPIDO);
+      this._planosAplica();
+      if (t.cameras.length !== 1 || t.cameras[0] !== cam) { for (const c of [...t.cameras]) t.deleteCamera(c); t.setCamera(cam); }
+      t.setResolution(cam, L0, L0);
+      this.s.escena.updateMatrixWorld(true);
+      t.update();
+      const st = t.stats, pend = st.queued + st.downloading + st.parsing, tempo = agora - F.tR0;
+      F.semFilaR = pend === 0 ? (F.semFilaR || 0) + 1 : 0;
+      F.quietosR = pend === 0 && (t.loadProgress === undefined || t.loadProgress >= 1 || F.semFilaR >= 30) ? (F.quietosR || 0) + 1 : 0;
+      F.prog = Math.min(0.99, (fr + 0.5) / F.faces.length) * 0.5;
+      if ((F.quietosR >= 3 && tempo > 150) || tempo > 15000) {
+        const r = this.r, cc = r.getClearColor(new THREE.Color()), ca = r.getClearAlpha(), ant = r.getRenderTarget(), al = F.alvos[fr];
+        const R = this.s.recorte, luz0 = R.luz.value.clone(), noite0 = R.noite.value, grade0 = R.grade.value.clone();
+        r.setClearColor(0x000000, 0); this._semFantasma();
+        for (const [rt, lado, liga] of [[al.A, FOTO_LADO, true], [al.W, FOTO_LADO_W, false]]) {
+          if (liga) { R.luz.value.set(1, 1, 1); R.noite.value = 0; R.grade.value.set(1, 1, 1, 0.18); } else { R.luz.value.set(0, 0, 0); R.noite.value = 1; }
+          F.limpos.add(rt); rt.scissorTest = false; rt.viewport.set(0, 0, lado, lado); r.setRenderTarget(rt); r.clear(); r.render(this.s.escena, cam);
+        }
+        R.luz.value.copy(luz0); R.noite.value = noite0; R.grade.value.copy(grade0); r.setRenderTarget(ant); r.setClearColor(cc, ca);
+        F.log.push({ f: F.faces[fr], rapido: true, ms: Math.round(tempo), vis: st.visible });
+        F.nRapido++; F.tR0 = agora; F.quietosR = 0; F.semFilaR = 0; F.i = Math.max(F.nRapido, F.k); F.t0 = agora;
+        if (F.nRapido >= F.faces.length && !this.pronto) { this.pronto = true; this.tPronto = agora; }
+        this.atualizaCredito();
+      }
+      this.acordar(); return;
+    }
     const N = FOTO_N, L = FOTO_LADO;
     if (!F.fila) { F.fila = []; for (let j = 0; j < N; j++) for (let k = 0; k < N; k++) F.fila.push([(k * L) / N, (j * L) / N, L / N]); F.feitosF = 0; }
     const [x, y, w] = F.fila[0];
-    const t = this.s.tiles, base = F.cams[F.faces[F.i]];
+    const t = this.s.tiles, base = F.cams[F.faces[F.k]];
     if (!F.sel) F.sel = new THREE.PerspectiveCamera(90, 1, 3, RAIO);
     const cam = F.sel; cam.quaternion.copy(base.quaternion); cam.position.set(0, 0, 0); cam.up.copy(base.up);
     cam.setViewOffset(L, L, x, y, w, w); cam.updateProjectionMatrix(); cam.updateMatrixWorld(true);
@@ -586,7 +626,7 @@ export class VistaGoogle {
     this.s.escena.updateMatrixWorld(true);
     t.update();
     const st = t.stats, pend = st.queued + st.downloading + st.parsing, tempo = agora - F.t0;
-    F.prog = (F.i + Math.min(0.99, F.feitosF / (L * L))) / F.faces.length; // share of this face's area already shot
+    F.prog = (F.k + Math.min(0.99, F.feitosF / (L * L))) / F.faces.length; // share of this face's area already shot
     // only when this region is COMPLETE (queue empty for 3 frames); a full budget or a stuck queue gives up much later
     // 21/10 SACADA-GOOGLE-JA (phone, local test): a region could sit with an EMPTY queue and loadProgress < 1 (a tile that never
     // finishes) and was only shot after the 60 s timeout - or at once when the visitor moved the view (new camera = new queue):
@@ -600,8 +640,8 @@ export class VistaGoogle {
       F.t0 = agora; F.quietos = 0; this.acordar(); return;
     }
     if ((F.quietos >= 3 && tempo > 200) || (cheio && pend === 0 && tempo > 12000) || tempo > 60000) {
-      F.quietos = 0; F.log.push({ f: F.faces[F.i], r: F.reg, ms: Math.round(tempo), cheio: t.lruCache.isFull(), mb: Math.round(t.lruCache.cachedBytes / 1048576), vis: st.visible });
-      const r = this.r, cc = r.getClearColor(new THREE.Color()), ca = r.getClearAlpha(), ant = r.getRenderTarget(), al = F.alvos[F.i];
+      F.quietos = 0; F.log.push({ f: F.faces[F.k], r: F.reg, ms: Math.round(tempo), cheio: t.lruCache.isFull(), mb: Math.round(t.lruCache.cachedBytes / 1048576), vis: st.visible });
+      const r = this.r, cc = r.getClearColor(new THREE.Color()), ca = r.getClearAlpha(), ant = r.getRenderTarget(), al = F.alvos[F.k];
       const R = this.s.recorte, luz0 = R.luz.value.clone(), noite0 = R.noite.value, grade0 = R.grade.value.clone();
       r.setClearColor(0x000000, 0);
       const pinta = (rt, lado, ms) => {
@@ -621,18 +661,18 @@ export class VistaGoogle {
       // flush: every tile of the region just shot leaves memory now (the LRU kept them: the budget filled region after region)
       { const c = t.lruCache, mx = c.maxBytesSize; if (c.cachedBytes > mx * 0.7) { for (const k of [...t.cameras]) t.deleteCamera(k); c.maxBytesSize = 1; this.s.esvaziar(); c.maxBytesSize = mx; } } // flush only when nearly full (08/10: on 4G the full flush re-downloaded shared tiles every region)
       F.fila.shift(); F.feitosF += w * w; F.reg++; F.t0 = agora;
-      if (!F.fila.length) { F.fila = null; F.reg = 0; F.i++; }
+      if (!F.fila.length) { F.fila = null; F.reg = 0; F.k++; } F.i = Math.max(F.nRapido >= 99 ? 0 : F.nRapido, F.k);
       // 21/10 SACADA-GOOGLE-JA: the window shows Google as soon as the FIRST face (the window's own direction) is shot; faces not
       // shot yet keep the haze of the hour (render-mix VEU), never our render's city - before, the whole cube had to finish (~1 min)
-      if (F.i >= 1 && !this.pronto) { this.pronto = true; this.tPronto = agora; }
-      if (F.i >= F.faces.length && !F.extras && F.faces.length < 4) { // the unit's other points: facade neighbours + down, in the background
+      if (F.k >= 1 && !this.pronto && !RAPIDO) { this.pronto = true; this.tPronto = agora; }
+      if (F.k >= F.faces.length && !F.extras && F.faces.length < 4) { // the unit's other points: facade neighbours + down, in the background
         F.extras = true; const p0 = F.faces[0], viz = p0 < 2 ? [4, 5] : p0 > 3 ? [0, 1] : [];
         const add = [...viz, 3].filter((f) => !F.faces.includes(f)).slice(0, 4 - F.faces.length);
         const alvo = (lado) => { const c = new THREE.WebGLRenderTarget(lado, lado, { type: THREE.UnsignedByteType, generateMipmaps: false, depthBuffer: true }); c.texture.colorSpace = THREE.SRGBColorSpace; c.texture.minFilter = c.texture.magFilter = THREE.LinearFilter; return c; };
         for (const f of add) { F.faces.push(f); F.alvos.push({ A: alvo(FOTO_LADO), W: alvo(FOTO_LADO_W) }); F.mats.push(new THREE.Matrix4().multiplyMatrices(F.cams[f].projectionMatrix, F.cams[f].matrixWorldInverse)); }
         if (add.length) { F.fundo = true; if (!this.pronto) { this.pronto = true; this.tPronto = agora; } }
       }
-      if (F.i >= F.faces.length) { F.feito = true; this._soltaMS(); cam.clearViewOffset(); if (!this.pronto) { this.pronto = true; this.tPronto = agora; } STATUS.tiles = st.visible || 0; if (capacidade().nivel === 'topo') this.restauraCache(); else this.soltaCache(); try { localStorage.removeItem(chaveLocal('tabela3d-foto-ativa')); } catch (e) { /* ignore */ } }
+      if (F.k >= F.faces.length) { F.feito = true; this._soltaMS(); cam.clearViewOffset(); if (!this.pronto) { this.pronto = true; this.tPronto = agora; } STATUS.tiles = st.visible || 0; if (capacidade().nivel === 'topo') this.restauraCache(); else this.soltaCache(); try { localStorage.removeItem(chaveLocal('tabela3d-foto-ativa')); } catch (e) { /* ignore */ } }
     }
     this.acordar();
   }

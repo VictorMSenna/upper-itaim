@@ -1,0 +1,156 @@
+{
+ "_leia": "E0 22/10 v2 (prototipo, so a demo): vista da janela = 1 imagem por face, fundo distante (cilindro raio_m + chao) visto da posicao real de cada ponto do 360. v2: FOTO REAL do drone do Hugo (DJI 4K, abr/2026, voos 0198/0199 olhando para o norte), costurada (OpenCV) e posta na faixa lon/lat da face N; nenhum pixel do Google, nenhuma IA na cidade. Nao e a vista real da unidade: imagem ilustrativa. v2.1: ceu = nuvens REAIS do drone em todas as horas (norte-ceu.webp), pintadas por hora no shader. 26/10: faces S e E (E = S espelhada, o voo nao tem quadros olhando para leste); W = N espelhada (a costura oeste do voo 0203 saiu com fantasma).",
+ "credito": "Vista da janela: imagem ilustrativa",
+ "padrao": {
+  "final": 7,
+  "andar": 10
+ },
+ "faces": {
+  "N": {
+   "finais": [
+    3,
+    5,
+    7
+   ],
+   "ponto_ref": "varanda",
+   "base": "norte-base.webp",
+   "noite": "norte-noite.webp",
+   "lon": [
+    -76,
+    84
+   ],
+   "lat": [
+    -72,
+    40
+   ],
+   "raio_m": 350,
+   "chao_m": -100,
+   "andar_geracao": 10,
+   "piso_m": 2.81,
+   "desloc_final": {
+    "3": -10.505,
+    "5": -5.325,
+    "7": 0
+   },
+   "fonte": "drone-base2 (monta_base_drone2.py) + camadas_foto.py",
+   "alfa_meio": true,
+   "ceu": "norte-ceu.webp",
+   "ceu_lon": [
+    -95,
+    105
+   ],
+   "ceu_lat": [
+    0,
+    70
+   ]
+  },
+  "S": {
+   "ponto_ref": "varanda",
+   "lon": [
+    -76,
+    84
+   ],
+   "lat": [
+    -72,
+    40
+   ],
+   "raio_m": 350,
+   "chao_m": -100,
+   "andar_geracao": 10,
+   "piso_m": 2.81,
+   "alfa_meio": true,
+   "ceu": "norte-ceu.webp",
+   "ceu_lon": [
+    -95,
+    105
+   ],
+   "ceu_lat": [
+    0,
+    70
+   ],
+   "finais": [
+    4,
+    6
+   ],
+   "base": "sul-base.webp",
+   "noite": "sul-noite.webp",
+   "desloc_final": {
+    "4": 10.355,
+    "6": 0
+   },
+   "fonte": "drone 0204 (17 quadros olhando S/SO, 120-170 m), costurado; vao da costura no horizonte coberto com a propria linha de predios ao lado"
+  },
+  "E": {
+   "ponto_ref": "varanda",
+   "lon": [
+    -76,
+    84
+   ],
+   "lat": [
+    -72,
+    40
+   ],
+   "raio_m": 350,
+   "chao_m": -100,
+   "andar_geracao": 10,
+   "piso_m": 2.81,
+   "alfa_meio": true,
+   "ceu": "norte-ceu.webp",
+   "ceu_lon": [
+    -95,
+    105
+   ],
+   "ceu_lat": [
+    0,
+    70
+   ],
+   "finais": [
+    8,
+    9
+   ],
+   "base": "leste-base.webp",
+   "noite": "leste-noite.webp",
+   "desloc_final": {
+    "8": 0,
+    "9": -5.1
+   },
+   "fonte": "SEM cobertura de drone para leste (1 quadro): panorama da face S espelhado"
+  },
+  "W": {
+   "ponto_ref": "varanda",
+   "lon": [
+    -76,
+    84
+   ],
+   "lat": [
+    -72,
+    40
+   ],
+   "raio_m": 350,
+   "chao_m": -100,
+   "andar_geracao": 10,
+   "piso_m": 2.81,
+   "alfa_meio": true,
+   "ceu": "norte-ceu.webp",
+   "ceu_lon": [
+    -95,
+    105
+   ],
+   "ceu_lat": [
+    0,
+    70
+   ],
+   "finais": [
+    1,
+    2
+   ],
+   "base": "oeste-base.webp",
+   "noite": "oeste-noite.webp",
+   "desloc_final": {
+    "1": 5.05,
+    "2": 0
+   },
+   "fonte": "cobertura de drone para oeste insuficiente (voo 0203: ~80 graus, costura com fantasma e degrau de exposicao): panorama da face N espelhado"
+  }
+ }
+}
