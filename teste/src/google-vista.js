@@ -164,13 +164,13 @@ const LUZ_GLSL = `
             float t = atan(an.g * 2.0 - 1.0, an.r * 2.0 - 1.0) * 0.25;
             vec2 e1 = vec2(cos(t), sin(t)), e2 = vec2(-e1.y, e1.x);
             float d1 = dot(nB.xz, e1), d2 = dot(nB.xz, e2);
-            if (abs(d1) > abs(d2)) { tgv = e2; lado = sign(d1) * 17.0; } else { tgv = e1; lado = 40.0 + sign(d2) * 17.0; } temMapa = 1.0; alin = smoothstep(0.88, 0.95, max(abs(d1), abs(d2)) / max(length(nB.xz), 1e-4)); // triangles > ~30 deg off the facade (balcony zig-zag) get no window: they only made shards
+            if (abs(d1) > abs(d2)) { tgv = e2; lado = sign(d1) * 17.0; } else { tgv = e1; lado = 40.0 + sign(d2) * 17.0; } temMapa = 1.0; alin = smoothstep(0.95, 0.985, max(abs(d1), abs(d2)) / max(length(nB.xz), 1e-4)); /* JANELAS-GIGANTES 26/10: was 0.88..0.95 (up to 28 deg off: parallelograms) */ // triangles > ~30 deg off the facade (balcony zig-zag) get no window: they only made shards
           }
         }
         float sF = dot(vB5.xz, tgv);
         vec2 cel = vec2(floor(sF / 3.1), floor(vB5.y / 2.85));
         vec2 f = vec2(fract(sF / 3.1), fract(vB5.y / 2.85));
-        float jan = smoothstep(0.20, 0.24, f.x) * (1.0 - smoothstep(0.76, 0.80, f.x)) * smoothstep(0.34, 0.38, f.y) * (1.0 - smoothstep(0.84, 0.88, f.y));
+        float jan = smoothstep(0.24, 0.28, f.x) * (1.0 - smoothstep(0.72, 0.76, f.x)) * smoothstep(0.34, 0.38, f.y) * (1.0 - smoothstep(0.84, 0.88, f.y)); // JANELAS-GIGANTES 26/10: 1.49 x 1.43 m (was 1.74 m wide)
         float id = g3dH21(cel + lado + floor(vB5.xz / 40.0) * 3.1);
         jan *= mix(1.0, alin, temMapa) * (uAngExt > 0.0 ? temMapa : 1.0); // RODADA 26/10: inside our facade map only (off-map triangles made loose patches)${typeof location !== 'undefined' && /[?&]gangdbg=1/.test(location.search) ? ' outgoingLight = vec3(temMapa, alin, jan) * 0.6; cB = vec3(0.0);' : ''} // ?gangdbg=1: R = facade map here, G = triangle on the facade axis, B = window
         // RODADA 26/10: a wall seen at a grazing angle (from the balcony, looking down past a roof edge) squeezes a window into a
@@ -181,6 +181,16 @@ const LUZ_GLSL = `
         // and the wall must face the camera: cos(view, normal) > ~0.4 (the camera of the window photo is the balcony eye)
         vec3 camJ = (uParaB5 * vec4(cameraPosition, 1.0)).xyz;
         jan *= smoothstep(0.30, 0.45, abs(dot(nB, normalize(camJ - vB5))));
+        // JANELAS-GIGANTES 26/10 (Meta, live site pub5 after an orbit at 21:00: GIANT beige rectangles on the melted mesh of the near
+        // Google building in front of the tower + loose light flakes). The cell is in metres, but on Google's coarse/melted mesh
+        // (a) the surface is not vertical: fade from |n.y| 0.08 to 0.16 (~5-9 deg; the gate above lets up to 0.3 = 17 deg in);
+        // (b) the normal changes from pixel to pixel (small triangles at random angles = melted): fwidth of the normal;
+        // (c) outside view only (uPertoJ = 1, set by ligarGoogleCena): no lit window on a wall nearer than 45 m to the camera, full
+        //     from 90 m - near the camera the coarse mesh melts and one window fills a big part of the screen. The 360 window
+        //     view (balcony eye, neighbours at 20-80 m) keeps them (uPertoJ = 0).
+        jan *= 1.0 - smoothstep(0.08, 0.16, abs(nB.y));
+        jan *= 1.0 - smoothstep(0.05, 0.15, length(fwidth(nB)));
+        if (uPertoJ > 0.5) jan *= smoothstep(45.0, 90.0, length(camJ - vB5));
         float acesa = step(id, uFracG) * jan;
         float lum = dot(cB, vec3(0.2126, 0.7152, 0.0722));
         float vidro = 1.0 - smoothstep(0.18, 0.5, lum);
@@ -330,7 +340,7 @@ export function iniciarGoogle() {
       s.tomar = (quem, pai, matriz, cam, erro) => {
         if (s.dono !== quem) {
           if (s.dono && s.dono.restauraCache) s.dono.restauraCache(); // the 360 photo freed the tiles: the next view gets its budget back
-          s._recFeito = false; if (s.recorte) { s.recorte.vizN.value = 0; s.recorte.mapaR.value.w = 0; s.recorte.ret.value.set(1, 1, 0, 0); } // building ghosts only in the outside view (cena3d turns them on)
+          s._recFeito = false; if (s.recorte) { s.recorte.vizN.value = 0; s.recorte.perto.value = 0; s.recorte.mapaR.value.w = 0; s.recorte.ret.value.set(1, 1, 0, 0); } // building ghosts only in the outside view (cena3d turns them on)
           for (const c of [...tiles.cameras]) tiles.deleteCamera(c);
           tiles.setCamera(cam);
           const g = tiles.group; if (g.parent !== pai) { g.parent?.remove(g); pai.add(g); }
@@ -350,18 +360,18 @@ export function iniciarGoogle() {
       // fragments inside the rectangle and nearer than the tower are dropped (x0 > x1 = off, e.g. in the 360)
       s.recorte = { liga: { value: 0 }, min: { value: new THREE.Vector3() }, max: { value: new THREE.Vector3() }, paraB5: { value: new THREE.Matrix4() }, ecefParaB5: null,
         ret: { value: new THREE.Vector4(1, 1, 0, 0) }, prof: { value: 0 },
-        luz: { value: new THREE.Vector3(1, 1, 1) }, noite: { value: 0 }, frac: { value: 0.25 }, grade: { value: new THREE.Vector4(1, 1, 1, 0.18) }, nit: { value: C8.nitidez }, viz: { value: Array.from({ length: 16 }, () => new THREE.Vector4()) }, vizN: { value: 0 },
+        luz: { value: new THREE.Vector3(1, 1, 1) }, noite: { value: 0 }, frac: { value: 0.25 }, perto: { value: 0 }, grade: { value: new THREE.Vector4(1, 1, 1, 0.18) }, nit: { value: C8.nitidez }, viz: { value: Array.from({ length: 16 }, () => new THREE.Vector4()) }, vizN: { value: 0 },
         mapa: { value: null }, mapaR: { value: new THREE.Vector4(0, 0, 0, 0) }, camB5: { value: new THREE.Vector3() }, alvoB5: { value: new THREE.Vector3() },
         terr: { value: null }, terrExt: { value: 0 }, ang: { value: null }, angExt: { value: 0 }, lote: { value: Array.from({ length: 24 }, () => new THREE.Vector2()) }, loteN: { value: 0 } };
       const shaderRecorte = (sh) => {
         sh.uniforms.uLote = s.recorte.lote; sh.uniforms.uLoteN = s.recorte.loteN; sh.uniforms.uRecLiga = s.recorte.liga; sh.uniforms.uRecMin = s.recorte.min; sh.uniforms.uRecMax = s.recorte.max; sh.uniforms.uParaB5 = s.recorte.paraB5;
         sh.uniforms.uRet = s.recorte.ret; sh.uniforms.uProf = s.recorte.prof;
-        sh.uniforms.uLuz = s.recorte.luz; sh.uniforms.uNoiteG = s.recorte.noite; sh.uniforms.uFracG = s.recorte.frac; sh.uniforms.uGrade = s.recorte.grade; sh.uniforms.uNitG = s.recorte.nit; sh.uniforms.uViz = s.recorte.viz; sh.uniforms.uVizN = s.recorte.vizN;
+        sh.uniforms.uLuz = s.recorte.luz; sh.uniforms.uNoiteG = s.recorte.noite; sh.uniforms.uFracG = s.recorte.frac; sh.uniforms.uPertoJ = s.recorte.perto; sh.uniforms.uGrade = s.recorte.grade; sh.uniforms.uNitG = s.recorte.nit; sh.uniforms.uViz = s.recorte.viz; sh.uniforms.uVizN = s.recorte.vizN;
         sh.uniforms.uMapaP = s.recorte.mapa; sh.uniforms.uMapaR = s.recorte.mapaR; sh.uniforms.uCamB5 = s.recorte.camB5; sh.uniforms.uAlvoB5 = s.recorte.alvoB5;
         sh.uniforms.uTerr = s.recorte.terr; sh.uniforms.uTerrExt = s.recorte.terrExt; sh.uniforms.uAng = s.recorte.ang; sh.uniforms.uAngExt = s.recorte.angExt;
         sh.vertexShader = 'uniform mat4 uParaB5;\nvarying vec3 vB5;\nvarying float vProf;\n' + sh.vertexShader.replace('#include <project_vertex>', '#include <project_vertex>\nvB5 = (uParaB5 * modelMatrix * vec4(transformed, 1.0)).xyz;\nvProf = -mvPosition.z;');
         sh.fragmentShader = 'uniform mat4 uParaB5;\nuniform vec2 uLote[24];\nuniform float uLoteN;\nbool g3dNoLote(vec2 p) { bool d = false; for (int i = 0; i < 24; i++) { if (float(i) >= uLoteN) break; vec2 a = uLote[i], b = uLote[i + 1 < 24 ? i + 1 : 0]; if (float(i + 1) >= uLoteN) b = uLote[0]; if ((a.y > p.y) != (b.y > p.y) && p.x < (b.x - a.x) * (p.y - a.y) / (b.y - a.y) + a.x) d = !d; } return d; }\nuniform float uRecLiga;\nuniform vec3 uRecMin;\nuniform vec3 uRecMax;\nuniform vec4 uRet;\nuniform float uProf;\nvarying vec3 vB5;\nvarying float vProf;\n'
-          + 'uniform vec4 uGrade;\nuniform float uNitG;\nuniform vec4 uViz[16];\nuniform float uVizN;\nbool g3dNoViz(vec3 p) { for (int i = 0; i < 8; i++) { if (float(i) >= uVizN) break; vec4 a = uViz[2 * i], b = uViz[2 * i + 1]; vec2 d = p.xz - a.xy; vec2 q = vec2(dot(d, b.xy), dot(d, vec2(-b.y, b.x))); if (abs(q.x) < a.z && abs(q.y) < a.w && p.y > b.z && p.y < b.w) return true; } return false; }\n' + GRADE_GLSL + 'uniform vec3 uLuz;\nuniform float uNoiteG;\nuniform float uFracG;\nuniform sampler2D uAng;\nuniform float uAngExt;\nfloat g3dH21(vec2 p) { p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }\n'
+          + 'uniform vec4 uGrade;\nuniform float uNitG;\nuniform vec4 uViz[16];\nuniform float uVizN;\nbool g3dNoViz(vec3 p) { for (int i = 0; i < 8; i++) { if (float(i) >= uVizN) break; vec4 a = uViz[2 * i], b = uViz[2 * i + 1]; vec2 d = p.xz - a.xy; vec2 q = vec2(dot(d, b.xy), dot(d, vec2(-b.y, b.x))); if (abs(q.x) < a.z && abs(q.y) < a.w && p.y > b.z && p.y < b.w) return true; } return false; }\n' + GRADE_GLSL + 'uniform vec3 uLuz;\nuniform float uNoiteG;\nuniform float uFracG;\nuniform float uPertoJ;\nuniform sampler2D uAng;\nuniform float uAngExt;\nfloat g3dH21(vec2 p) { p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }\n'
           + FANT_GLSL
           + sh.fragmentShader.replace('#include <map_fragment>', NIT_GLSL).replace('#include <opaque_fragment>', LUZ_GLSL + '\n#include <opaque_fragment>').replace('void main() {',
           'void main() {\n  if (uRecLiga > 0.5 && all(greaterThan(vB5, uRecMin)) && all(lessThan(vB5, uRecMax))) discard;\n  if (uRecLiga > 0.5 && uLoteN > 2.5 && vB5.y > uRecMin.y && vB5.y < uRecMax.y && g3dNoLote(vB5.xz)) discard;\n  if (g3dFantasma(vB5)) discard;\n#ifndef G3D_PLANO\n  if (uVizN > 0.5 && g3dNoViz(vB5)) discard;\n#endif');
@@ -1197,7 +1207,7 @@ export async function ligarGoogleCena({ scene, camera, renderer, ref, aoMudar, e
         if (s.dono && s.dono !== api && s.dono.ativo) return; // the 360 window owns the tiles while it is open
         if (s.dono !== api) {
           const voltando = !!s.dono && mostrando;
-          s.tomar(api, scene, m, camSelFora, ERRO_360 * 1.25); s.pintar(ganhoCena);
+          s.tomar(api, scene, m, camSelFora, ERRO_360 * 1.25); s.pintar(ganhoCena); s.recorte.perto.value = 1; // JANELAS-GIGANTES: near-wall fade of the lit windows, outside view only
           if (voltando) { refino = { lote0: null, pMax: 0, t0: performance.now() }; carga.querySelector('b').style.width = '4%'; renderer.domElement.parentElement.appendChild(carga); bombear(); }
         }
         // tiles are selected only for the part of the screen above the unit card (phone bottom sheet): the city hidden
