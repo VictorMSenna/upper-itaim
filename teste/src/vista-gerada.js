@@ -74,7 +74,7 @@ void main(){
   vec3 ceu = mix(ceuHoriz, ceuTopo, smoothstep(0.0, 0.75, el));
   if (usaCeu > 0.5) {   // v2.1: the REAL clouds at every hour, painted per hour (gold rims, pink/orange dusk, dark clouds at night)
     float lonR = atan(r.y, r.x);
-    float elD = el < 0.11 ? 0.11 + (0.11 - el) * 0.5 : el;   // v4 (Meta review): never read the dome's stretched bottom rows; below 6.3 deg the clouds above are folded down (no flat white band)
+    float elD = el < 0.21 ? 0.21 + (0.21 - el) * 0.6 : el;   // v5: the dome's rows below ~12 deg are the drone's grey horizon haze + stretched columns (they sat as a grey band ABOVE the lifted city); below 12 deg the clouds above are folded down
     vec2 uc = vec2((lonR - faixaCeu.x) / (faixaCeu.y - faixaCeu.x), (elD - faixaCeu.z) / (faixaCeu.w - faixaCeu.z));
     vec4 S = texture2D(tCeu, clamp(uc, vec2(0.0005), vec2(0.9995)));
     vec3 cs = lin(S.rgb);
@@ -102,7 +102,12 @@ void main(){
     cc = mix(cc, noite, pesos.w);
     // ALTURA 26/10 (audit E4): the dome's lowest rows are stretched pixel columns ("rain" streaks just above the skyline):
     // below ~6 deg the real clouds fade into the plain gradient of the hour (horizon haze)
-    ceu = mix(mix(ceuHoriz, ceuTopo, smoothstep(0.0, 0.75, el)), cc, 0.45 + 0.55 * smoothstep(0.0, 0.11, el));
+    // v5 (comparison sheet: the folded cloud bases made a dark grey band on the skyline): near the horizon the folded clouds are
+    // lightened towards the horizon colour and mostly replaced by the pale gradient (real haze); 15 % texture at 0 deg, all clouds at 6.3 deg
+    vec3 grad0 = mix(ceuHoriz, ceuTopo, smoothstep(0.0, 0.75, el));
+    float kh = 1.0 - smoothstep(0.0, 0.21, el);
+    cc = mix(cc, grad0, 0.5 * kh);
+    ceu = mix(grad0, cc, 0.25 + 0.75 * smoothstep(0.0, 0.21, el));
   }
   ceu += mix(vec3(0.11, 0.06, 0.028), vec3(0.030, 0.018, 0.009), pesos.w) * kNoite * exp(-max(el, 0.0) / 0.06);   // city glow on the horizon (dim at night)
   vec3 cor = ceu;
@@ -115,8 +120,8 @@ void main(){
     x = 0.18 * pow(max(x, vec3(0.0)) / 0.18, vec3(contraste));
     x = x * (1.0 - escuro) + lin(texture2D(tNoite, uv).rgb) * kNoite;
     // v4 (Meta review: hard skyline cut; audit E12: flat wall of night dots): aerial perspective - the far city (photo latitude near the
-    // drone's horizon) fades towards the horizon colour of the hour, up to 38 %; at night that dims the far lights
-    x = mix(x, mix(ceuHoriz, ceuTopo, 0.15), 0.38 * smoothstep(-0.075, 0.004, lat));
+    // drone's horizon) fades towards the horizon colour of the hour; at night that dims the far lights
+    x = mix(x, ceuHoriz, 0.22 * smoothstep(-0.03, 0.004, lat));   // v5: only the last ~2 deg below the drone's horizon, 22 % (v4: 4.3 deg at 38 % read as a smog band)
     cor = mix(ceu, x, B.a);
   }
   float aw = m * forca;

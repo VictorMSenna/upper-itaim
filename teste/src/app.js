@@ -271,7 +271,7 @@ function abrirUnidade(id) {
     el('figure', { class: 'cd-foto', style: 'margin:6px 0 14px', onclick: () => abrirGaleria(0) },
       el('img', { src: CONFIG.fotos2026.lista[0].arq, alt: CONFIG.fotos2026.altCard, loading: 'lazy', width: 900, height: 1600 }),
       // ENTRAR-NO-AP 21/10: the way in sits on the first screen of the card (on phones the button below was 256 px under the fold)
-      el('button', { type: 'button', class: 'pilula-360 cd-360', id: 'cd-360', hidden: true, 'aria-label': 'Entrar no apartamento: tour 360° por dentro',
+      el('button', { type: 'button', class: 'pilula-360 cd-360', id: 'cd-360', hidden: true,
         onclick: (e) => { e.stopPropagation(); entrarApartamento(u.id); } }, icone360(), el('span', {}, el('b', { text: 'Entrar no apartamento' }), el('small', { text: 'tour 360° por dentro' }))),
       el('figcaption', { text: CONFIG.tour.legendaCard })),
     // Card do Hugo (spec C): price, R$/m2 vs the table average (only when true: below, or within 1% = "na média"), chips,
@@ -303,7 +303,7 @@ function abrirUnidade(id) {
         CONFIG.tour.botaoVideo, el('small', { class: 'btn-sub', text: CONFIG.tour.botaoVideoSub })),
       numeroWa.length >= 10 ? null : el('p', { class: 'cd-wa-nota so-revisao' }, texto(CONFIG.faltaWhatsapp))),
     sims.length ? el('section', { class: 'cd-sim', id: 'cd-sim' }, el('h3', { text: 'Similares disponíveis' }),
-      el('div', { class: 'cd-sim-l' }, ...sims.map((v) => el('button', { type: 'button', class: 'cd-sim-b', 'data-num': v.numero, onclick: () => abrirUnidade(v.id), 'aria-label': `Unidade ${v.numero}, ${precoCheio(v.preco_total)}` },
+      el('div', { class: 'cd-sim-l' }, ...sims.map((v) => el('button', { type: 'button', class: 'cd-sim-b', 'data-num': v.numero, onclick: () => abrirUnidade(v.id) },
         el('b', {}, 'Unid. ', el('span', { class: 'mono', text: v.numero })), el('span', { class: 'mono', text: precoMi(v.preco_total) }))))) : null,
     el('p', { class: 'cd-tabela', text: TABELA_LINHA }),
     el('details', { class: 'detalhes', id: 'detalhes' },

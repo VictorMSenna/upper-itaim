@@ -106,7 +106,7 @@ async function criar({ container, manifesto = 'assets/render/tour360/manifesto.j
   // in the window glass (porta-varanda at night, seen whenever Google's city is not over the window). The button now shows on every
   // point with a window (or the balcony glass) and OFF removes both reflections: Google's city in the balcony glass and the lamps'
   // reflection in the window pixels (render-mix.js semRefl).
-  function botaoReflexo() { const p = PTS[pontoVisivel()]; bR.hidden = !((G && G.vidro) || !!(p && p.camadas && p.camadas.fora)); bR.setAttribute('aria-pressed', String(estado.reflexo !== false)); }
+  function botaoReflexo() { const p = PTS[pontoVisivel()]; bR.hidden = !((G && G.vidro) || !!(p && p.camadas && p.camadas.fora && !p.camadas.vidro)); /* ALTURA 26/10 (audit E2): on a balcony point (has a 'vidro' layer) the button only acts on Google's glass; measured 0 % change at the varanda without it */ bR.setAttribute('aria-pressed', String(estado.reflexo !== false)); }
   container.appendChild(raiz);
   if (EMBUTIDO) raiz.style.touchAction = 'pan-y'; // ITEM 11: a vertical swipe scrolls the page, a sideways drag turns the 360, a pinch zooms
   { const b = raiz.querySelector('.t360-rot'); let tm = 0; b.addEventListener('click', (ev) => { ev.stopPropagation(); const ab = !b.classList.contains('aberto'); b.classList.toggle('aberto', ab); b.setAttribute('aria-expanded', String(ab)); clearTimeout(tm); if (ab) tm = setTimeout(() => { b.classList.remove('aberto'); b.setAttribute('aria-expanded', 'false'); }, 6000); }); }
