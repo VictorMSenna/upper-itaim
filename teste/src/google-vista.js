@@ -120,7 +120,7 @@ const LUZ_GLSL = `
     vec3 cB = outgoingLight;
     outgoingLight = g3dGrade(cB * uLuz, uGrade); // C7 21/10: day grade (identity at night and in the window photo shots)
     // street lights (same map as our city: R sodium, G LED, B terrain height), on what is near street level
-    if (uNoiteG > 0.001 && uTerrExt > 0.0) {
+    if (uNoiteG > 0.001 && uTerrExt > 0.0${typeof location !== 'undefined' && /[?&]g3dlz=0/.test(location.search) ? ' && false' : ''}) { // ?g3dlz=0: street-light pools off (tests)
       vec2 rq = (vB5.xz + uTerrExt) / (2.0 * uTerrExt);
       if (all(greaterThan(rq, vec2(0.0))) && all(lessThan(rq, vec2(1.0)))) {
         vec3 lz = texture2D(uTerr, rq).rgb;
@@ -131,7 +131,27 @@ const LUZ_GLSL = `
     if (uNoiteG > 0.001) {
       vec3 nB = normalize(cross(dFdx(vB5), dFdy(vB5)));
       bool verde = cB.g > cB.r * 1.08 && cB.g > cB.b * 1.04;
-      if (!verde && abs(nB.y) < 0.5 && vB5.y > 3.5) {
+      // RODADA 26/10 (Meta: beige 'lit window' patches on roofs and ground seen from the balcony, sticker-like patches on facades):
+      // only vertical surfaces (|n.y| < 0.3; a 30-45 deg tiled roof has |n.y| 0.7-0.87 but the screen-derivative normal of coarse
+      // tiles wanders) and >= 3 m above the LOCAL ground (terrain map), not above the B5 origin
+      float hLocJ = vB5.y;
+      if (uTerrExt > 0.0) { vec2 rqJ = (vB5.xz + uTerrExt) / (2.0 * uTerrExt); if (all(greaterThan(rqJ, vec2(0.0))) && all(lessThan(rqJ, vec2(1.0)))) hLocJ = vB5.y - (texture2D(uTerr, rqJ).b * 60.0 - 20.0); }
+      // ... and only on the wall of a TALL building of OUR footprint map (c.w = 1 + roof height, cena3d montaMapaPredios), below its
+      // roof: the photo W layer (dumped 26/10) had shards on parapets / roof steps of the low houses and on Google's roof edges
+      bool altoJ = true;
+      if (uMapaR.z > 0.0) {
+        vec2 uvJ = vec2((vB5.x - uMapaR.x) * uMapaR.z, 1.0 - (vB5.z - uMapaR.y) * uMapaR.z);
+        if (all(greaterThan(uvJ, vec2(0.0))) && all(lessThan(uvJ, vec2(1.0)))) {
+          vec2 eJ = vec2(2.5 * uMapaR.z, 0.0); float topoJ = -1.0; vec4 cJ;
+          cJ = texture2D(uMapaP, uvJ); if (cJ.a > 0.5) topoJ = max(topoJ, cJ.w - 1.0);
+          cJ = texture2D(uMapaP, uvJ + eJ.xy); if (cJ.a > 0.5) topoJ = max(topoJ, cJ.w - 1.0);
+          cJ = texture2D(uMapaP, uvJ - eJ.xy); if (cJ.a > 0.5) topoJ = max(topoJ, cJ.w - 1.0);
+          cJ = texture2D(uMapaP, uvJ + eJ.yx); if (cJ.a > 0.5) topoJ = max(topoJ, cJ.w - 1.0);
+          cJ = texture2D(uMapaP, uvJ - eJ.yx); if (cJ.a > 0.5) topoJ = max(topoJ, cJ.w - 1.0);
+          altoJ = topoJ > 12.0 && vB5.y < topoJ - 1.5;
+        }
+      }
+      if (!verde && altoJ && abs(nB.y) < 0.3 && hLocJ > 9.0 && vB5.y > 3.5) { // 9 m (3rd floor up): the walls/parapets of the 1-2 storey houses below (prints) got shards
         // window grid along the facade. 08/10 (Victor: 'triangulos, varios formatos'): Google's mesh is a patchwork of
         // triangles with their own normals, so a grid following each triangle's normal broke every window into shards. The
         // facade direction now comes from OUR city's walls (fachadas-angulo.webp, angle mod 90 deg): every triangle of a
@@ -144,7 +164,7 @@ const LUZ_GLSL = `
             float t = atan(an.g * 2.0 - 1.0, an.r * 2.0 - 1.0) * 0.25;
             vec2 e1 = vec2(cos(t), sin(t)), e2 = vec2(-e1.y, e1.x);
             float d1 = dot(nB.xz, e1), d2 = dot(nB.xz, e2);
-            if (abs(d1) > abs(d2)) { tgv = e2; lado = sign(d1) * 17.0; } else { tgv = e1; lado = 40.0 + sign(d2) * 17.0; } temMapa = 1.0; alin = smoothstep(0.80, 0.90, max(abs(d1), abs(d2)) / max(length(nB.xz), 1e-4)); // triangles > ~30 deg off the facade (balcony zig-zag) get no window: they only made shards
+            if (abs(d1) > abs(d2)) { tgv = e2; lado = sign(d1) * 17.0; } else { tgv = e1; lado = 40.0 + sign(d2) * 17.0; } temMapa = 1.0; alin = smoothstep(0.88, 0.95, max(abs(d1), abs(d2)) / max(length(nB.xz), 1e-4)); // triangles > ~30 deg off the facade (balcony zig-zag) get no window: they only made shards
           }
         }
         float sF = dot(vB5.xz, tgv);
@@ -152,7 +172,15 @@ const LUZ_GLSL = `
         vec2 f = vec2(fract(sF / 3.1), fract(vB5.y / 2.85));
         float jan = smoothstep(0.20, 0.24, f.x) * (1.0 - smoothstep(0.76, 0.80, f.x)) * smoothstep(0.34, 0.38, f.y) * (1.0 - smoothstep(0.84, 0.88, f.y));
         float id = g3dH21(cel + lado + floor(vB5.xz / 40.0) * 3.1);
-        jan *= mix(1.0, alin, temMapa);${typeof location !== 'undefined' && /[?&]gangdbg=1/.test(location.search) ? ' outgoingLight = vec3(temMapa, alin, jan) * 0.6; cB = vec3(0.0);' : ''} // ?gangdbg=1: R = facade map here, G = triangle on the facade axis, B = window
+        jan *= mix(1.0, alin, temMapa) * (uAngExt > 0.0 ? temMapa : 1.0); // RODADA 26/10: inside our facade map only (off-map triangles made loose patches)${typeof location !== 'undefined' && /[?&]gangdbg=1/.test(location.search) ? ' outgoingLight = vec3(temMapa, alin, jan) * 0.6; cB = vec3(0.0);' : ''} // ?gangdbg=1: R = facade map here, G = triangle on the facade axis, B = window
+        // RODADA 26/10: a wall seen at a grazing angle (from the balcony, looking down past a roof edge) squeezes a window into a
+        // loose sliver ('manchas soltas sobre os telhados'). Screen footprint anisotropy: one pixel spans much more wall along one
+        // axis than the other -> no lit window there (frontal walls, near or far, keep ratio ~1)
+        float gxJ = length(dFdx(vB5)), gyJ = length(dFdy(vB5));
+        jan *= 1.0 - smoothstep(2.5, 4.0, max(gxJ, gyJ) / max(min(gxJ, gyJ), 1e-4));
+        // and the wall must face the camera: cos(view, normal) > ~0.4 (the camera of the window photo is the balcony eye)
+        vec3 camJ = (uParaB5 * vec4(cameraPosition, 1.0)).xyz;
+        jan *= smoothstep(0.30, 0.45, abs(dot(nB, normalize(camJ - vB5))));
         float acesa = step(id, uFracG) * jan;
         float lum = dot(cB, vec3(0.2126, 0.7152, 0.0722));
         float vidro = 1.0 - smoothstep(0.18, 0.5, lum);
@@ -332,7 +360,7 @@ export function iniciarGoogle() {
         sh.uniforms.uMapaP = s.recorte.mapa; sh.uniforms.uMapaR = s.recorte.mapaR; sh.uniforms.uCamB5 = s.recorte.camB5; sh.uniforms.uAlvoB5 = s.recorte.alvoB5;
         sh.uniforms.uTerr = s.recorte.terr; sh.uniforms.uTerrExt = s.recorte.terrExt; sh.uniforms.uAng = s.recorte.ang; sh.uniforms.uAngExt = s.recorte.angExt;
         sh.vertexShader = 'uniform mat4 uParaB5;\nvarying vec3 vB5;\nvarying float vProf;\n' + sh.vertexShader.replace('#include <project_vertex>', '#include <project_vertex>\nvB5 = (uParaB5 * modelMatrix * vec4(transformed, 1.0)).xyz;\nvProf = -mvPosition.z;');
-        sh.fragmentShader = 'uniform vec2 uLote[24];\nuniform float uLoteN;\nbool g3dNoLote(vec2 p) { bool d = false; for (int i = 0; i < 24; i++) { if (float(i) >= uLoteN) break; vec2 a = uLote[i], b = uLote[i + 1 < 24 ? i + 1 : 0]; if (float(i + 1) >= uLoteN) b = uLote[0]; if ((a.y > p.y) != (b.y > p.y) && p.x < (b.x - a.x) * (p.y - a.y) / (b.y - a.y) + a.x) d = !d; } return d; }\nuniform float uRecLiga;\nuniform vec3 uRecMin;\nuniform vec3 uRecMax;\nuniform vec4 uRet;\nuniform float uProf;\nvarying vec3 vB5;\nvarying float vProf;\n'
+        sh.fragmentShader = 'uniform mat4 uParaB5;\nuniform vec2 uLote[24];\nuniform float uLoteN;\nbool g3dNoLote(vec2 p) { bool d = false; for (int i = 0; i < 24; i++) { if (float(i) >= uLoteN) break; vec2 a = uLote[i], b = uLote[i + 1 < 24 ? i + 1 : 0]; if (float(i + 1) >= uLoteN) b = uLote[0]; if ((a.y > p.y) != (b.y > p.y) && p.x < (b.x - a.x) * (p.y - a.y) / (b.y - a.y) + a.x) d = !d; } return d; }\nuniform float uRecLiga;\nuniform vec3 uRecMin;\nuniform vec3 uRecMax;\nuniform vec4 uRet;\nuniform float uProf;\nvarying vec3 vB5;\nvarying float vProf;\n'
           + 'uniform vec4 uGrade;\nuniform float uNitG;\nuniform vec4 uViz[16];\nuniform float uVizN;\nbool g3dNoViz(vec3 p) { for (int i = 0; i < 8; i++) { if (float(i) >= uVizN) break; vec4 a = uViz[2 * i], b = uViz[2 * i + 1]; vec2 d = p.xz - a.xy; vec2 q = vec2(dot(d, b.xy), dot(d, vec2(-b.y, b.x))); if (abs(q.x) < a.z && abs(q.y) < a.w && p.y > b.z && p.y < b.w) return true; } return false; }\n' + GRADE_GLSL + 'uniform vec3 uLuz;\nuniform float uNoiteG;\nuniform float uFracG;\nuniform sampler2D uAng;\nuniform float uAngExt;\nfloat g3dH21(vec2 p) { p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }\n'
           + FANT_GLSL
           + sh.fragmentShader.replace('#include <map_fragment>', NIT_GLSL).replace('#include <opaque_fragment>', LUZ_GLSL + '\n#include <opaque_fragment>').replace('void main() {',
