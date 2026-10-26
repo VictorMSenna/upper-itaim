@@ -1212,6 +1212,9 @@ export async function ligarGoogleCena({ scene, camera, renderer, ref, aoMudar, e
         out.length = 0; tiles.getAttributions(out);
         const txt = textoDados(out);
         const el = cred.querySelector('.g3d-attr'); if (el.textContent !== txt) el.textContent = txt;
+        // 26/10 (Sites: 'cidade' visivel:false for ~2-8 s after Google's tiles were already on screen): the attribution shows as
+        // soon as one Google tile is drawn, not only when Google takes over from our city ('mostrando', 85% loaded)
+        if (cred.hidden && !api.noite && !falhou && g.visible && tiles.stats.visible > 0 && txt) cred.hidden = false;
         if (!cred.hidden) posCred();
         const st = tiles.stats, pend = st.queued + st.downloading + st.parsing;
         if (!mostrando) {
@@ -1298,7 +1301,7 @@ export async function ligarGoogleCena({ scene, camera, renderer, ref, aoMudar, e
     // (kept for the API; Google now stays on at night with its own night light)
     definirNoite(v) {
       if (api.noite === v) return;
-      api.noite = v; g.visible = !v; cred.hidden = v || !(mostrando && !falhou);
+      api.noite = v; g.visible = !v; cred.hidden = v || falhou || !(mostrando || tiles.stats.visible > 0);
     },
     // daylight is baked in the tiles: darken + tint at dusk/night (materials are unlit)
     definirSol(el) {
