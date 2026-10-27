@@ -931,6 +931,9 @@ export class VistaGoogle {
       // stage with no pending tile for 15 frames). Tiles that load later (the visitor turns to a new part of the window) load
       // without a bar: the window already shows Google.
       if (this._fim) return;
+      // the window shows Google as early as before ASK 8 (>= 100 tiles on screen, or 85 % of a batch of >= 200), even if the coarse
+      // stage has not settled yet (measured on TEST: waiting for the settle alone was slower on Hugo's page)
+      if (!this.pronto && st.visible >= 100) { this.pronto = true; this.tPronto = performance.now(); }
       if (!this._lote) this._lote = { base: st.loaded, p: 0, b2: null };
       const Lt = this._lote;
       let f;
@@ -939,7 +942,7 @@ export class VistaGoogle {
       Lt.p = Math.max(Lt.p, Math.min(f, this._fase1 !== false ? 0.6 : 0.99));
       const ver = !!janelaNaTela;
       if (this._fase1 === false && this._q1 >= 15 && (this.s.tiles.loadProgress === undefined || this.s.tiles.loadProgress >= 1 || this._q1 >= 30)) {
-        this._fim = true; barra.style.width = '100%';
+        this._fim = true; barra.style.width = '100%'; if (ver) el.hidden = false; // 100 % is always seen before the bar goes
         this._some = setTimeout(() => { el.hidden = true; this._some = 0; }, 900);
         return;
       }
