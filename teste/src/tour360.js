@@ -530,6 +530,7 @@ async function criar({ container, manifesto = 'assets/render/tour360/manifesto.j
         ativoEm: (id) => !falhou && !!(PTS[id].camadas && PTS[id].camadas.fora) && !!geoDoPonto(id),
         aposPintar(id, e) {
           if (!this.ativoEm(id)) return;
+          if (vista.s && vista.s.recorte && vista.s.recorte.janHora) vista.s.recorte.janHora.value = estado.minutos; // JANELAS-NOITE: occupancy follows the hour
           // 21/10 SACADA-GOOGLE-JA: a new point waits for ITS view (haze of the hour meanwhile, render-mix VEU); before, the 'ready'
           // of the first point carried over and the balcony showed Google's coarse root tiles (melted blobs) for seconds
           if (atual !== null && atual !== id && !gm.MODO_FOTO) { if (vista.recomeca) vista.recomeca(); else { vista.pronto = false; vista._lote = null; vista._quieto = 0; } } // ASK 8: coarse stage + a new bar for the new point
@@ -681,8 +682,9 @@ async function criar({ container, manifesto = 'assets/render/tour360/manifesto.j
   await repinta(); if (fechado) return alca;
   if (G) G.aposPintar(estado.ponto, esfera(estado.ponto));
   montaHot(); desenha();
-  await pGoogle; if (fechado) return alca;
-  raiz.dataset.ready = '1';
+  // 27/10 (Sites pub 10: passo -> restaurado 2.8-8.1 s): the tour is shown and its api returned as soon as the layers are painted;
+  // Google keeps loading behind (ligaGoogle hooks the paint itself when it is ready). data-ready still means 'Google set up'.
+  pGoogle.then(() => { if (!fechado) raiz.dataset.ready = '1'; });
   if (/[?&]debug360=1/.test(location.search)) { // (B1) device report for Victor's screenshot
     const d = document.createElement('pre');
     d.style.cssText = 'position:absolute;left:8px;top:240px;z-index:50;margin:0;padding:6px 8px;font:11px/1.35 monospace;background:rgba(0,0,0,.75);color:#fff;border-radius:6px;pointer-events:none;white-space:pre-wrap;max-width:80%';

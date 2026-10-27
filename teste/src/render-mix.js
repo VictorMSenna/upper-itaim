@@ -295,10 +295,24 @@ function mascaraRegular(fonte) {
     return c;
   } catch (e) { return fonte; }
 }
+// 27/10 (Sites pub 10, passo -> restaurado): precarregarCamadas(urls) decodes layers ahead (same decode options as the default
+// path below); carregaTextura takes a pre-decoded bitmap instead of fetching + decoding again (~1.1 s per 4096 px layer).
+const PRE_DEC = new Map();
+export function precarregarCamadas(urls) {
+  return Promise.all(urls.map((url) => {
+    if (!PRE_DEC.has(url)) PRE_DEC.set(url, fetch(url).then((r) => r.blob()).then((b) => createImageBitmap(b, { imageOrientation: 'flipY', colorSpaceConversion: 'none', premultiplyAlpha: 'none' })).then((bm) => { try { const c = typeof OffscreenCanvas !== 'undefined' ? new OffscreenCanvas(2, 2) : document.createElement('canvas'); c.getContext('2d').drawImage(bm, 0, 0, 2, 2); } catch (e) {} return bm; }));
+    return PRE_DEC.get(url).then(() => true, () => { PRE_DEC.delete(url); return false; });
+  }));
+}
 async function carregaTextura(url, max, dados = false, manterImagem = false, inteira = false, reduzida = false) {
   if (inteira) max = 0; // lamp layers (knee encoding + dither): an 8-bit canvas resize would re-quantize them into bands
-  const blob = await (await fetch(url)).blob();
-  let img = null, flipY = false;
+  let img = null, flipY = false, blob = null;
+  const pre = !dados && !reduzida ? PRE_DEC.get(url) : null;
+  if (pre) {
+    PRE_DEC.delete(url);
+    img = await pre.catch(() => null);
+  }
+  if (!img) blob = await (await fetch(url)).blob();
   // 26/10 UPPER-SOL-FLUIDO: a layer kept below its size on purpose (solind, 2:1) is resized while it decodes, off the main thread;
   // a browser without the resize options takes the full decode + canvas path below
   if (reduzida && max && !dados) {

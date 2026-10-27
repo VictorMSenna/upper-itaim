@@ -167,6 +167,8 @@ const LUZ_GLSL = `
       // of the wall the camera ray enters the box by (slab test; a roof entry or an up-facing fragment = no window), ground floor and the
       // last 1.5 m under the roof skipped. The same rectangle is thus hit by every pixel of the window, whichever triangle they are on.
       float janT = -1.0; vec2 celT = vec2(0.0);
+      float faceMap = 0.0; // JANELAS-NOITE: this face has an authored map (grid or balcony band); else the far-city rule below applies
+      float mapaOk = 0.0, mapaU = 0.0, mapaH = 0.0, mapaRow = 0.0; // JANELAS-NOITE: wall entry point of the camera ray
       float uT = 0.0, hT = 0.0, uST = 0.0, bayT = 3.1, hbT = 0.0; vec2 clT = vec2(0.0); float boxT = 0.0, faceT = 0.0; vec2 nFJ = vec2(1.0, 0.0); // JANELAS-COMBINADAS
       if (uJanN > 0.5 && uPertoJ < 0.5) {
         vec3 camN = (uParaB5 * vec4(cameraPosition, 1.0)).xyz;
@@ -184,6 +186,8 @@ const LUZ_GLSL = `
           vec3 t1 = (vec3(-a.z, b.z, -a.w) - o) * iD, t2 = (vec3(a.z, b.w, a.w) - o) * iD;
           vec3 tn = min(t1, t2), tf = max(t1, t2);
           float tE = max(max(tn.x, tn.y), tn.z), tS = min(min(tf.x, tf.y), tf.z);
+          if (!(tE > tS || tE <= 0.0 || tn.y >= max(tn.x, tn.z)) && abs(nB.y) < 0.75) { bool fxM = tn.x >= tn.z; vec3 PM = o + tE * D; mapaOk = 1.0; mapaU = fxM ? PM.z : PM.x; mapaH = PM.y;
+            mapaRow = float(i) * 4.0 + (fxM ? (PM.x > 0.0 ? 0.0 : 1.0) : (PM.z > 0.0 ? 2.0 : 3.0)); }
           if (tE > tS || tE <= 0.0 || tn.y >= max(tn.x, tn.z) || abs(nB.y) > 0.6) break; // missed the box, entered by the roof, or an up-facing fragment
           bool fx = tn.x >= tn.z;
           // 27/10: no per-fragment flat-facade gate: a window is a whole rectangle in wall coordinates, found once per cell in the photo (the gate cut it at pillars)
@@ -207,45 +211,84 @@ const LUZ_GLSL = `
       // clear dark opening, a wide dark band, no wall above / below) draw nothing.
       float fwU = 1.5 * fwidth(uT), fwH = 1.5 * fwidth(hT);
       if (janT >= 0.0) {
-        // JANELAS-BURACO 27/10 (Meta: our own rectangles read as pasted cards). An ON cell (floor x bay of the LiDAR wall, hashed at the
-        // far city's density) makes GOOGLE'S OWN window hole glow: mask = local darkness of the facade photo relative to its blurred
-        // local mean (mip level + 3.5 = ~11 texels), soft threshold, the texel slightly blurred (+0.7 level = ~1 texel dilation). The
-        // lit shape is the photo's hole, as blurred as the building; a wide dark band (balcony gap) is dark in the mean too, so it does
-        // not glow. Faint halo (+2 levels, 18 %) so it reads as light. Cells with no hole stay as Google draws them.
-        float mJ = 0.0, hJ = 0.0;
-#ifdef USE_MAP
-        if (janT > 0.5) {
-          vec3 LMJ = vec3(0.2126, 0.7152, 0.0722);
-          vec2 tsJ = vec2(textureSize(map, 0)), dxJ = dFdx(vMapUv) * tsJ, dyJ = dFdy(vMapUv) * tsJ;
-          float lodJ = max(0.0, 0.5 * log2(max(max(dot(dxJ, dxJ), dot(dyJ, dyJ)), 1e-6)));
-          float lmJ = max(dot(textureLod(map, vMapUv, lodJ + 3.5).rgb, LMJ), 1e-3);
-          float l1J = dot(textureLod(map, vMapUv, lodJ + 0.7).rgb, LMJ), l2J = dot(textureLod(map, vMapUv, lodJ + 2.0).rgb, LMJ);
-          float l5J = max(dot(textureLod(map, vMapUv, lodJ + 5.5).rgb, LMJ), 1e-3);
-          mJ = (1.0 - smoothstep(0.5, 0.75, l1J / lmJ)) * smoothstep(0.7, 0.9, lmJ / l5J); // a large dark area (balcony gap, big opening) is dark in the wider mean too: no glow
-          // only the flat facade parallel to the wall (zig-zag balconies make their own dark gaps) and away from the cell borders (a hole
-          // split by the LiDAR floor/bay line would be cut straight): soft fade over the outer 15-30 % of the cell
-          // a hole has wall on all four sides (1.3 m left/right, 1.2 m up/down along the WALL axes: a balcony recess is wider than a window, texture steps from the screen
-          // derivatives): balcony gaps (dark above and below) and slab shadows (dark left and right) do not glow
-          vec2 dUsJ = vec2(dFdx(uT), dFdy(uT)), dHsJ = vec2(dFdx(hT), dFdy(hT)); float detJ = dUsJ.x * dHsJ.y - dUsJ.y * dHsJ.x;
-          if (abs(detJ) > 1e-9) {
-            vec2 duvx = dFdx(vMapUv), duvy = dFdy(vMapUv);
-            vec2 Uu = (duvx * dHsJ.y - duvy * dHsJ.x) / detJ, Uh = (duvy * dUsJ.x - duvx * dUsJ.y) / detJ;
-            float lE = dot(textureLod(map, vMapUv - Uu * 1.3, lodJ + 0.7).rgb, LMJ), lD = dot(textureLod(map, vMapUv + Uu * 1.3, lodJ + 0.7).rgb, LMJ);
-            float lC = dot(textureLod(map, vMapUv + Uh * 1.2, lodJ + 0.7).rgb, LMJ), lB = dot(textureLod(map, vMapUv - Uh * 1.2, lodJ + 0.7).rgb, LMJ);
-            mJ *= smoothstep(1.2, 1.6, min(lE, lD) / max(l1J, 1e-3)) * smoothstep(1.2, 1.6, min(lC, lB) / max(l1J, 1e-3));
-          } else mJ = 0.0;
-          vec2 frJ = fract(vec2((uT - uST) / bayT, (hT - hbT) / 2.85));
-          float bordaJ = smoothstep(0.02, 0.3, min(frJ.x, 1.0 - frJ.x)) * smoothstep(0.02, 0.3, min(frJ.y, 1.0 - frJ.y)); // wide and soft: a hole split by the line dims, it is not cut
-          mJ *= bordaJ * smoothstep(0.88, 0.96, abs(dot(normalize(nB.xz + 1e-6), nFJ))) * (1.0 - smoothstep(0.04, 0.1, length(fwidth(nB)))); // + not on small balcony faces
-          hJ = (1.0 - smoothstep(0.6, 0.9, l2J / lmJ)) * smoothstep(0.7, 0.9, lmJ / l5J) * bordaJ * (1.0 - smoothstep(0.04, 0.1, length(fwidth(nB))));
+        // JANELAS-NOITE 27/10 (Meta after Victor's 'bem ridiculas': no runtime guess on Google's near mesh). The window grid of each
+        // near tower face was authored OFFLINE (assets/entorno/janelas-noite.json: LiDAR wall plane + bays / floors phase-fitted on a
+        // hi-res day capture of that facade, cells without a window excluded, reviewed on an overlay sheet). Row (slot * 4 + face) of
+        // uJanMap (96 x 128): texel 0 = (-, -, columns, window width), texel 1 = (first row centre h, floor pitch, rows, window height),
+        // texels 2-17 = the column centres u (4 per texel, real positions found in the photo), texels 18.. = one per grid row, 4 x 24-bit
+        // masks of the columns that have a window. The fragment's point on the
+        // wall plane (camera ray, as above) falls in one cell; a lit window is drawn as a window, not a sticker: interior colour per
+        // window (mostly warm 2700-3500 K, some cool, a few dim), a soft vertical gradient (ceiling light / curtain), a dark frame and
+        // a mullion, edges anti-aliased on the wall plane. Occupancy follows the hour (uJanHora): ~45 % at 19 h, ~38 % at 21 h, ~22 % at
+        // 23 h. Stable per window (hash of face + cell). Faces without a map stay as Google draws them (dark).
+        if (mapaOk > 0.5) {
+          int rowM = int(mapaRow); float uT = mapaU, hT = mapaH;
+          vec4 pA = texelFetch(uJanMap, ivec2(0, rowM), 0), pB = texelFetch(uJanMap, ivec2(1, rowM), 0);
+          vec4 sA = texelFetch(uJanMap, ivec2(80, rowM), 0), sB = texelFetch(uJanMap, ivec2(81, rowM), 0);
+          faceMap = max(step(0.5, pA.z) * step(0.5, pB.z), step(0.5, sB.w));
+          // BALCONY BAND (zig-zag balcony tower, recessed balconies): the glass behind each balcony is a horizontal strip per floor
+          // (sA = u0, u1, first band centre h, floor pitch; sB = floors, band height, unit width, on), cut into units along u; a lit
+          // unit glows warm with a curtain-like variation along the strip and a soft top / bottom edge. Whole strips, never specks.
+          if (sB.w > 0.5 && uNoiteG > 0.001 && uT > sA.x && uT < sA.y) {
+            float rS = floor((hT - sA.z) / sA.w + 0.5);
+            if (rS >= 0.0 && rS < sB.x) {
+              float lhS = hT - (sA.z + rS * sA.w), uu = (uT - sA.x) / sB.z, un = floor(uu), fu = fract(uu);
+              vec2 aaS = max(vec2(fwidth(uT), fwidth(hT)), vec2(1e-3));
+              float banda = smoothstep(-aaS.y * 1.5, aaS.y * 1.5, 0.5 * sB.y - abs(lhS)) * smoothstep(0.0, 0.08 + aaS.x / sB.z, min(fu, 1.0 - fu));
+              vec2 idS = vec2(un, rS) + vec2(float(rowM) * 53.0, 7.0);
+              float hr2 = uJanHora / 60.0; hr2 = hr2 < 12.0 ? hr2 + 24.0 : hr2;
+              float occS = hr2 < 19.0 ? mix(0.30, 0.45, clamp((hr2 - 17.0) / 2.0, 0.0, 1.0)) : hr2 < 21.0 ? mix(0.45, 0.38, (hr2 - 19.0) / 2.0) : hr2 < 23.0 ? mix(0.38, 0.22, (hr2 - 21.0) / 2.0) : hr2 < 26.0 ? mix(0.22, 0.08, (hr2 - 23.0) / 3.0) : 0.08;
+              float ligaS = step(g3dH21(idS), occS);
+              float cortS = 0.55 + 0.45 * smoothstep(0.15, 0.85, 0.5 + 0.5 * sin(6.2832 * (fu * (1.5 + g3dH21(idS + 2.0)) + g3dH21(idS + 5.0))));
+              vec3 corS = mix(vec3(1.0, 0.62, 0.32), vec3(1.0, 0.78, 0.55), g3dH21(idS + 9.0)) * (0.5 + 0.4 * g3dH21(idS + 3.0));
+              float vS = clamp(lhS / sB.y + 0.5, 0.0, 1.0);
+              outgoingLight = mix(outgoingLight, corS * cortS * mix(0.75, 1.05, vS), uNoiteG * ligaS * banda);
+            }
+          }
+          if (pA.z > 0.5 && pB.z > 0.5 && uNoiteG > 0.001) {
+            int nC = int(pA.z);
+            float c0 = texelFetch(uJanMap, ivec2(2, rowM), 0).x, cN = texelFetch(uJanMap, ivec2(2 + (nC - 1) / 4, rowM), 0)[(nC - 1) - ((nC - 1) / 4) * 4];
+            float pas = nC > 1 ? (cN - c0) / float(nC - 1) : 3.0;
+            int kE = int(clamp(floor((uT - c0) / max(pas, 0.5) + 0.5), 0.0, float(nC - 1)));
+            float cx = -1.0, cU = 0.0, dB = 1e9;
+            for (int q = -2; q <= 2; q++) { int k = kE + q; if (k < 0 || k >= nC) continue; float c = texelFetch(uJanMap, ivec2(2 + k / 4, rowM), 0)[k - (k / 4) * 4]; if (abs(uT - c) < dB) { dB = abs(uT - c); cx = float(k); cU = c; } }
+            float cy = floor((hT - pB.x) / pB.y + 0.5);
+            if (cx >= 0.0 && cy >= 0.0 && cy < pB.z && cy < 62.0) {
+              vec4 mk = texelFetch(uJanMap, ivec2(18 + int(cy), rowM), 0);
+              float canal = floor(cx / 24.0), bit = cx - canal * 24.0;
+              float v = canal < 0.5 ? mk.x : canal < 1.5 ? mk.y : canal < 2.5 ? mk.z : mk.w;
+              float tem = mod(floor(v / exp2(bit)), 2.0);
+              float lu = uT - cU, lh = hT - (pB.x + cy * pB.y), hw = 0.5 * pA.w, hh = 0.5 * pB.w;
+              vec2 aa = max(vec2(fwidth(uT), fwidth(hT)), vec2(1e-3));
+              float fora = smoothstep(-aa.x, aa.x, hw - abs(lu)) * smoothstep(-aa.y, aa.y, hh - abs(lh)); // window opening
+              float fr = 0.07; // frame width (m)
+              float vidro = smoothstep(-aa.x, aa.x, hw - fr - abs(lu)) * smoothstep(-aa.y, aa.y, hh - fr - abs(lh));
+              vec2 idJ = vec2(cx, cy) + vec2(rowM * 131, rowM * 17);
+              float hA = g3dH21(idJ), hB = g3dH21(idJ + 7.3), hC = g3dH21(idJ + 19.1);
+              float mul = step(1.25, pA.w) * (1.0 - smoothstep(0.02, 0.02 + aa.x, abs(lu - (hB - 0.5) * 0.25 * pA.w))); // a mullion on wide windows
+              float hr = uJanHora / 60.0; hr = hr < 12.0 ? hr + 24.0 : hr;
+              float occ = hr < 19.0 ? mix(0.30, 0.45, clamp((hr - 17.0) / 2.0, 0.0, 1.0)) : hr < 21.0 ? mix(0.45, 0.38, (hr - 19.0) / 2.0) : hr < 23.0 ? mix(0.38, 0.22, (hr - 21.0) / 2.0) : hr < 26.0 ? mix(0.22, 0.08, (hr - 23.0) / 3.0) : 0.08;
+              float liga = tem * step(hA, occ${typeof location !== 'undefined' && /[?&]jantodas=1/.test(location.search) ? ' * 0.0 + 1.0' : ''});
+              // interior colour: warm 2700-3500 K (70 %), neutral/cool 4000-5500 K (20 %), dim (10 %)
+              vec3 quente = mix(vec3(1.0, 0.62, 0.32), vec3(1.0, 0.76, 0.52), hC);
+              vec3 fria = mix(vec3(1.0, 0.88, 0.74), vec3(0.86, 0.9, 1.0), hC);
+              vec3 corW = hB < 0.70 ? quente : hB < 0.90 ? fria : quente * 0.35;
+              float forcaW = (0.55 + 0.45 * g3dH21(idJ + 3.7)) * (hB >= 0.90 ? 1.0 : 1.0);
+              float yv = clamp(lh / max(2.0 * hh, 1e-3) + 0.5, 0.0, 1.0);
+              float grad = g3dH21(idJ + 11.0) < 0.6 ? mix(0.72, 1.08, yv) : mix(1.05, 0.8, yv); // ceiling light / curtain lit from below
+              // a curtain drawn over part of ~1/3 of the windows (lit through it: dimmer, a touch warmer), from the left or the right
+              float temCort = step(g3dH21(idJ + 23.0), 0.35), ladoC = g3dH21(idJ + 29.0) < 0.5 ? -1.0 : 1.0, fracC = 0.3 + 0.4 * g3dH21(idJ + 31.0);
+              float cort = temCort * smoothstep(-aa.x, aa.x, ladoC * lu - hw * (1.0 - 2.0 * fracC));
+              vec3 luzW = corW * forcaW * grad * (1.0 - 0.75 * mul) * mix(1.0, 0.5, cort) * mix(vec3(1.0), vec3(1.0, 0.85, 0.7), cort);
+              float ver = ${typeof location !== 'undefined' && /[?&]jangrade=1/.test(location.search) ? '1.0' : '0.0'}; // ?jangrade=1 (tests): every mapped window outlined
+              outgoingLight = mix(outgoingLight, outgoingLight * 0.55, uNoiteG * tem * (fora - vidro)); // frame: darker than the wall
+              outgoingLight = mix(outgoingLight, luzW * 1.15, uNoiteG * liga * vidro);
+              outgoingLight = mix(outgoingLight, vec3(0.0, 1.0, 0.0), ver * tem * (fora - vidro));
+            }
+          }
         }
-#endif
-        ${typeof location !== 'undefined' && /[?&]janpdbg=1/.test(location.search) ? ' outgoingLight = cB * 0.35 + vec3(mJ * janT, 0.4 * janT, 0.6 * step(janT, 0.0));' : ''} // ?janpdbg=1: blue = footprint building, green = cell, red = hole mask
-        float acesaT = step(g3dH21(celT), min(1.0, uFracG * 1.6)) * step(0.5, janT)${typeof location !== 'undefined' && /[?&]janoff=1/.test(location.search) ? ' * 0.0' : ''};
-        float forcaT = 0.6 + 0.4 * g3dH21(celT + 3.0);
-        vec3 corJ = vec3(1.0, 0.72, 0.42) * forcaT;
-        outgoingLight += uNoiteG * acesaT * corJ * (0.85 * mJ + 0.18 * hJ);
-      } else if (!verde && altoJ && abs(nB.y) < 0.3 && hLocJ > 9.0 && vB5.y > 3.5) { // 9 m (3rd floor up): the walls/parapets of the 1-2 storey houses below (prints) got shards
+      }
+      if ((janT < 0.0 || faceMap < 0.5) && !verde && altoJ && abs(nB.y) < 0.3 && hLocJ > 9.0 && vB5.y > 3.5) { // 9 m (3rd floor up): the walls/parapets of the 1-2 storey houses below (prints) got shards
         // window grid along the facade. 08/10 (Victor: 'triangulos, varios formatos'): Google's mesh is a patchwork of
         // triangles with their own normals, so a grid following each triangle's normal broke every window into shards. The
         // facade direction now comes from OUR city's walls (fachadas-angulo.webp, angle mod 90 deg): every triangle of a
@@ -388,6 +431,7 @@ const PLANO_MAP_GLSL = `
   diffuseColor *= sampledDiffuseColor;
 #endif
 `;
+let NOITE_DADOS = null; // assets/entorno/janelas-noite.json (JANELAS-NOITE: offline window grids of the near towers), loaded once
 let PLANOS_DADOS = null; // assets/entorno/vizinhos-planos.json (docs/b10-scripts/gera_vizinhos_planos.py), loaded once
 // same curve as our city (entorno.js gradeEntorno): base grade by sun elevation + window lights at night
 export function luzDaCidade(el) {
@@ -477,18 +521,18 @@ export function iniciarGoogle() {
       // fragments inside the rectangle and nearer than the tower are dropped (x0 > x1 = off, e.g. in the 360)
       s.recorte = { liga: { value: 0 }, min: { value: new THREE.Vector3() }, max: { value: new THREE.Vector3() }, paraB5: { value: new THREE.Matrix4() }, ecefParaB5: null,
         ret: { value: new THREE.Vector4(1, 1, 0, 0) }, prof: { value: 0 },
-        luz: { value: new THREE.Vector3(1, 1, 1) }, noite: { value: 0 }, frac: { value: 0.25 }, perto: { value: 0 }, janB: { value: Array.from({ length: 64 }, () => new THREE.Vector4()) }, janN: { value: 0 }, janDet: { value: null }, janDetOk: { value: 0 }, grade: { value: new THREE.Vector4(1, 1, 1, 0.18) }, nit: { value: C8.nitidez }, viz: { value: Array.from({ length: 16 }, () => new THREE.Vector4()) }, vizN: { value: 0 },
+        luz: { value: new THREE.Vector3(1, 1, 1) }, noite: { value: 0 }, frac: { value: 0.25 }, perto: { value: 0 }, janB: { value: Array.from({ length: 64 }, () => new THREE.Vector4()) }, janN: { value: 0 }, janDet: { value: null }, janDetOk: { value: 0 }, janMap: { value: null }, janHora: { value: 1260 }, grade: { value: new THREE.Vector4(1, 1, 1, 0.18) }, nit: { value: C8.nitidez }, viz: { value: Array.from({ length: 16 }, () => new THREE.Vector4()) }, vizN: { value: 0 },
         mapa: { value: null }, mapaR: { value: new THREE.Vector4(0, 0, 0, 0) }, camB5: { value: new THREE.Vector3() }, alvoB5: { value: new THREE.Vector3() },
         terr: { value: null }, terrExt: { value: 0 }, ang: { value: null }, angExt: { value: 0 }, lote: { value: Array.from({ length: 24 }, () => new THREE.Vector2()) }, loteN: { value: 0 } };
       const shaderRecorte = (sh) => {
         sh.uniforms.uLote = s.recorte.lote; sh.uniforms.uLoteN = s.recorte.loteN; sh.uniforms.uRecLiga = s.recorte.liga; sh.uniforms.uRecMin = s.recorte.min; sh.uniforms.uRecMax = s.recorte.max; sh.uniforms.uParaB5 = s.recorte.paraB5;
         sh.uniforms.uRet = s.recorte.ret; sh.uniforms.uProf = s.recorte.prof;
-        sh.uniforms.uLuz = s.recorte.luz; sh.uniforms.uNoiteG = s.recorte.noite; sh.uniforms.uFracG = s.recorte.frac; sh.uniforms.uPertoJ = s.recorte.perto; sh.uniforms.uJanB = s.recorte.janB; sh.uniforms.uJanN = s.recorte.janN; sh.uniforms.uJanDet = s.recorte.janDet; sh.uniforms.uJanDetOk = s.recorte.janDetOk; sh.uniforms.uGrade = s.recorte.grade; sh.uniforms.uNitG = s.recorte.nit; sh.uniforms.uViz = s.recorte.viz; sh.uniforms.uVizN = s.recorte.vizN;
+        sh.uniforms.uLuz = s.recorte.luz; sh.uniforms.uNoiteG = s.recorte.noite; sh.uniforms.uFracG = s.recorte.frac; sh.uniforms.uPertoJ = s.recorte.perto; sh.uniforms.uJanB = s.recorte.janB; sh.uniforms.uJanN = s.recorte.janN; sh.uniforms.uJanDet = s.recorte.janDet; sh.uniforms.uJanDetOk = s.recorte.janDetOk; sh.uniforms.uJanMap = s.recorte.janMap; sh.uniforms.uJanHora = s.recorte.janHora; sh.uniforms.uGrade = s.recorte.grade; sh.uniforms.uNitG = s.recorte.nit; sh.uniforms.uViz = s.recorte.viz; sh.uniforms.uVizN = s.recorte.vizN;
         sh.uniforms.uMapaP = s.recorte.mapa; sh.uniforms.uMapaR = s.recorte.mapaR; sh.uniforms.uCamB5 = s.recorte.camB5; sh.uniforms.uAlvoB5 = s.recorte.alvoB5;
         sh.uniforms.uTerr = s.recorte.terr; sh.uniforms.uTerrExt = s.recorte.terrExt; sh.uniforms.uAng = s.recorte.ang; sh.uniforms.uAngExt = s.recorte.angExt;
         sh.vertexShader = 'uniform mat4 uParaB5;\nvarying vec3 vB5;\nvarying float vProf;\n' + sh.vertexShader.replace('#include <project_vertex>', '#include <project_vertex>\nvB5 = (uParaB5 * modelMatrix * vec4(transformed, 1.0)).xyz;\nvProf = -mvPosition.z;');
         sh.fragmentShader = 'uniform mat4 uParaB5;\nuniform vec2 uLote[24];\nuniform float uLoteN;\nbool g3dNoLote(vec2 p) { bool d = false; for (int i = 0; i < 24; i++) { if (float(i) >= uLoteN) break; vec2 a = uLote[i], b = uLote[i + 1 < 24 ? i + 1 : 0]; if (float(i + 1) >= uLoteN) b = uLote[0]; if ((a.y > p.y) != (b.y > p.y) && p.x < (b.x - a.x) * (p.y - a.y) / (b.y - a.y) + a.x) d = !d; } return d; }\nuniform float uRecLiga;\nuniform vec3 uRecMin;\nuniform vec3 uRecMax;\nuniform vec4 uRet;\nuniform float uProf;\nvarying vec3 vB5;\nvarying float vProf;\n'
-          + 'uniform vec4 uGrade;\nuniform float uNitG;\nuniform vec4 uViz[16];\nuniform float uVizN;\nbool g3dNoViz(vec3 p) { for (int i = 0; i < 8; i++) { if (float(i) >= uVizN) break; vec4 a = uViz[2 * i], b = uViz[2 * i + 1]; vec2 d = p.xz - a.xy; vec2 q = vec2(dot(d, b.xy), dot(d, vec2(-b.y, b.x))); if (abs(q.x) < a.z && abs(q.y) < a.w && p.y > b.z && p.y < b.w) return true; } return false; }\n' + GRADE_GLSL + 'uniform vec3 uLuz;\nuniform float uNoiteG;\nuniform float uFracG;\nuniform float uPertoJ;\nuniform vec4 uJanB[64];\nuniform float uJanN;\nuniform sampler2D uJanDet;\nuniform float uJanDetOk;\nuniform sampler2D uAng;\nuniform float uAngExt;\nfloat g3dH21(vec2 p) { p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }\n'
+          + 'uniform vec4 uGrade;\nuniform float uNitG;\nuniform vec4 uViz[16];\nuniform float uVizN;\nbool g3dNoViz(vec3 p) { for (int i = 0; i < 8; i++) { if (float(i) >= uVizN) break; vec4 a = uViz[2 * i], b = uViz[2 * i + 1]; vec2 d = p.xz - a.xy; vec2 q = vec2(dot(d, b.xy), dot(d, vec2(-b.y, b.x))); if (abs(q.x) < a.z && abs(q.y) < a.w && p.y > b.z && p.y < b.w) return true; } return false; }\n' + GRADE_GLSL + 'uniform vec3 uLuz;\nuniform float uNoiteG;\nuniform float uFracG;\nuniform float uPertoJ;\nuniform vec4 uJanB[64];\nuniform float uJanN;\nuniform sampler2D uJanDet;\nuniform highp sampler2D uJanMap;\nuniform float uJanHora;\nuniform float uJanDetOk;\nuniform sampler2D uAng;\nuniform float uAngExt;\nfloat g3dH21(vec2 p) { p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }\n'
           + FANT_GLSL
           + sh.fragmentShader.replace('#include <map_fragment>', NIT_GLSL).replace('#include <opaque_fragment>', LUZ_GLSL + '\n#include <opaque_fragment>').replace('void main() {',
           'void main() {\n  if (uRecLiga > 0.5 && all(greaterThan(vB5, uRecMin)) && all(lessThan(vB5, uRecMax))) discard;\n  if (uRecLiga > 0.5 && uLoteN > 2.5 && vB5.y > uRecMin.y && vB5.y < uRecMax.y && g3dNoLote(vB5.xz)) discard;\n  if (g3dFantasma(vB5)) discard;\n#ifndef G3D_PLANO\n  if (uVizN > 0.5 && g3dNoViz(vB5)) discard;\n#endif');
@@ -617,15 +661,16 @@ export class VistaGoogle {
     this.dirsV = new Float32Array(out);
   }
   // JANELAS-PLANOS: the near LiDAR boxes (vizinhos-planos.json) around this eye -> uJanB (32 nearest, < 260 m, height >= 6 m,
-  // rectangle fill >= 0.7; up to 32 boxes). Recomputed when the eye moves (another point / unit). 27/10: only with ?janplanos=1 (not approved yet).
+  // rectangle fill >= 0.7; up to 32 boxes). Recomputed when the eye moves (another point / unit). 27/10 JANELAS-NOITE: DEFAULT in the 360 window; ?janplanos=0 = the pub 9 rule (tests).
   _janPlanos() {
     const R = this.s.recorte;
-    if (!R.janB || !R.ecefParaB5 || !this.matriz || (typeof location !== 'undefined' && !/[?&]janplanos=1/.test(location.search))) { if (R.janN) R.janN.value = 0; return; } // 27/10: OPT-IN (?janplanos=1) until Meta approves the near windows; default = pub 9 rule (none under 150 m)
+    if (!R.janB || !R.ecefParaB5 || !this.matriz || (typeof location !== 'undefined' && /[?&]janplanos=0/.test(location.search))) { if (R.janN) R.janN.value = 0; return; } // 27/10 JANELAS-NOITE: default ON in the 360 window; ?janplanos=0 = the pub 9 rule (tests)
     const chave = this.matriz.elements.map((x) => x.toFixed(2)).join(',');
     if (this._janChave === chave) { R.janN.value = this._janN || 0; R.janDetOk.value = this._janDet ? 1 : 0; if (this._janDet) R.janDet.value = this._janDet.tex; return; }
     this._janChave = chave; this._janN = 0; R.janN.value = 0;
     if (!PLANOS_DADOS) PLANOS_DADOS = fetch('assets/entorno/vizinhos-planos.json').then((r) => (r.ok ? r.json() : null)).catch(() => null);
-    PLANOS_DADOS.then((D) => {
+    if (!NOITE_DADOS) NOITE_DADOS = fetch('assets/entorno/janelas-noite.json', { cache: 'no-cache' }).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+    Promise.all([PLANOS_DADOS, NOITE_DADOS]).then(([D, JN]) => {
       if (this._janChave !== chave || !D || !D.partes) return;
       const paraB5 = new THREE.Matrix4().copy(R.ecefParaB5).multiply(this.matriz.clone().invert());
       const olho = new THREE.Vector3(0, 0, 0).applyMatrix4(paraB5);
@@ -633,6 +678,19 @@ export class VistaGoogle {
         const qx = dx * c + dz * s, qz = -dx * s + dz * c; return Math.hypot(Math.max(Math.abs(qx) - p.h[0], 0), Math.max(Math.abs(qz) - p.h[1], 0)); };
       const sel = D.partes.filter((p) => p.fill >= 0.7 && p.y[1] - p.y[0] >= 6).map((p) => ({ p, d: dist(p) })).filter((x) => x.d < 260 && x.d > 2).sort((a, b) => a.d - b.d).slice(0, 32);
       sel.forEach(({ p }, i) => { R.janB.value[2 * i].set(p.c[0], p.c[1], p.h[0], p.h[1]); R.janB.value[2 * i + 1].set(Math.cos(p.a), Math.sin(p.a), p.y[0], p.y[1]); });
+      // JANELAS-NOITE: the offline grid of each selected face -> rows of uJanMap (96 x 128 RGBA float)
+      if (!R.janMap.value) { const t = new THREE.DataTexture(new Float32Array(96 * 128 * 4), 96, 128, THREE.RGBAFormat, THREE.FloatType); t.minFilter = t.magFilter = THREE.NearestFilter; R.janMap.value = t; }
+      { const T = R.janMap.value, d = T.image.data, F = (JN && JN.faces) || {}; d.fill(0); let nF = 0;
+        sel.forEach(({ p }, i) => { for (let f = 0; f < 4; f++) {
+          const m = F[`${p.id}.${p.n || 0}-f${f}`]; if (!m || !((m.colunas_u.length && m.linhas_h.length) || m.sacada)) continue;
+          const row = i * 4 + f, k0 = row * 96 * 4, nc = Math.min(64, m.colunas_u.length); nF++;
+          if (m.sacada) { const q = m.sacada; d.set([q.u[0], q.u[1], q.h0, q.andar], k0 + 80 * 4); d.set([q.linhas, q.alt, q.unidade, 1], k0 + 81 * 4); }
+          if (!nc || !m.linhas_h.length) continue;
+          d.set([0, 0, nc, m.janela.larg], k0); d.set([m.linhas_h[0], m.andar, Math.min(62, m.linhas_h.length), m.janela.alt], k0 + 4);
+          d.set(m.colunas_u.slice(0, nc), k0 + 8);
+          m.mascara.slice(0, 62).forEach((lin, r) => { const w = [0, 0, 0, 0]; for (let c = 0; c < Math.min(nc, lin.length); c++) if (lin[c] === '1') w[Math.floor(c / 24)] += 2 ** (c % 24); d.set(w, k0 + (18 + r) * 4); });
+        } });
+        T.needsUpdate = true; this._janFaces = nF; }
       this._janSel = sel.map((x) => x.p); this._janDet = null; // JANELAS-COMBINADAS: detection redone for this eye
       this._janN = sel.length; if (this.s.dono === this) R.janN.value = sel.length;
       if (typeof window !== 'undefined') window.__g3dJanPlanos = { olho: olho.toArray().map((x) => +x.toFixed(1)), n: sel.length, ids: sel.map((x) => x.p.id + ':' + x.d.toFixed(0)) };
