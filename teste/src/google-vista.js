@@ -370,7 +370,21 @@ export function iniciarGoogle() {
     try {
       const [{ TilesRenderer }, { GoogleCloudAuthPlugin }] = await Promise.all([import(`${CDN}index.js`), import(`${CDN}index.core-plugins.js`)]);
       const tiles = new TilesRenderer();
-      tiles.registerPlugin(new GoogleCloudAuthPlugin({ apiToken: chave, autoRefreshToken: true, logoUrl: LOGO, useRecommendedSettings: false }));
+      const auth = new GoogleCloudAuthPlugin({ apiToken: chave, autoRefreshToken: true, logoUrl: LOGO, useRecommendedSettings: false });
+      tiles.registerPlugin(auth);
+      // 27/10 ASK 8 (a): the site embeds the module twice (hero + block-3 tour, same origin). Google's tile files are sent with
+      // 'Cache-Control: private, max-age=14400' (measured 27/10), but their URLs carry the session token, so the tour's own session
+      // missed every file the hero had already downloaded. The frames now share ONE session through a BroadcastChannel of the
+      // origin: a frame starting asks (1.5 s max) and reuses the token of a frame already running; the browser's HTTP cache then
+      // serves the tour the files the hero downloaded. Each frame still requests its own root.json. Embedded only; ?gpartilha=0 = off.
+      let canal = null, sessaoHeroi = null; // root.json with another frame's session = HTTP 400 (measured): the shared token is set AFTER this frame's own root
+      try { if (window.parent !== window && typeof BroadcastChannel !== 'undefined' && !/[?&]gpartilha=0/.test(location.search)) canal = new BroadcastChannel('g3d-sessao'); } catch (e) { canal = null; }
+      if (canal) {
+        const veio = await new Promise((ok) => { const t = setTimeout(() => ok(null), 1500); canal.onmessage = (ev) => { const d = ev.data; if (d && d.sessao) { clearTimeout(t); ok(d.sessao); } }; canal.postMessage({ pede: 1 }); });
+        if (veio) sessaoHeroi = veio; else STATUS.canal = 'sem-resposta';
+        STATUS.respostas = 0;
+        canal.onmessage = (ev) => { const d = ev.data; if (d && d.pede) { if ((auth.auth || auth).sessionToken) { canal.postMessage({ sessao: (auth.auth || auth).sessionToken }); STATUS.respostas++; } else STATUS.semToken = (STATUS.semToken || 0) + 1; } };
+      }
       const draco = new DRACOLoader(); draco.setDecoderPath(DRACO);
       const gltf = new GLTFLoader(tiles.manager); gltf.setDRACOLoader(draco);
       tiles.manager.addHandler(/\.gltf$/, gltf);
@@ -473,6 +487,7 @@ export function iniciarGoogle() {
         s._camInicial = cam;
       });
       tiles.deleteCamera(s._camInicial);
+      if (sessaoHeroi) { (auth.auth || auth).sessionToken = sessaoHeroi; STATUS.sessaoPartilhada = true; } // ASK 8 (a): the children then have the same URLs as the other frame's
       tiles.addEventListener('load-error', (ev) => { STATUS.erro = String(ev.error && ev.error.message || ev.error).slice(0, 160); });
       STATUS.estado = 'pronto';
       return s;
