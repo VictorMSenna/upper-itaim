@@ -532,7 +532,7 @@ async function criar({ container, manifesto = 'assets/render/tour360/manifesto.j
           if (!this.ativoEm(id)) return;
           // 21/10 SACADA-GOOGLE-JA: a new point waits for ITS view (haze of the hour meanwhile, render-mix VEU); before, the 'ready'
           // of the first point carried over and the balcony showed Google's coarse root tiles (melted blobs) for seconds
-          if (atual !== null && atual !== id && !gm.MODO_FOTO) { vista.pronto = false; vista._lote = null; vista._quieto = 0; }
+          if (atual !== null && atual !== id && !gm.MODO_FOTO) { if (vista.recomeca) vista.recomeca(); else { vista.pronto = false; vista._lote = null; vista._quieto = 0; } } // ASK 8: coarse stage + a new bar for the new point
           const g0 = geoDoPonto(id);
           // follows the unit the client opened: final (side, xy, bearing) + floor from dados/google-geo.json; old per-point geo as fallback
           const g = g0.porUnidade ? g0 : { ...g0, h: g0.h + (andar != null && g0.andar_ref != null ? (andar - g0.andar_ref) * (g0.por_andar || 2.81) : 0) };
@@ -674,9 +674,14 @@ async function criar({ container, manifesto = 'assets/render/tour360/manifesto.j
   if (VEU.fora.value && !/[?&]vistagerada=0/.test(location.search)) criarVistaGerada({ cena, PTS, andar, final, RAIO, modo: 'espera', renderer }).then((v) => { // not awaited: never delays the 360
     if (!v) return; if (fechado) { v.liberar(); return; } VG = v; raiz.appendChild(v.credito); VG.aposPintar(pontoVisivel(), esfera(pontoVisivel())); desenha();
   }).catch(() => { VG = null; });
+  // 26/10 ASK 8 (measured: the window's first Google tile came ~8 s after the tour opened, because Google started only after the
+  // panorama layers were painted): Google's session and the window view start NOW, in parallel with the layers. Until the layers are
+  // in, the window mask is empty, so nothing of Google is drawn (the haze stays); the paint hook below gives it the mask and the light.
+  const pGoogle = ligaGoogle();
   await repinta(); if (fechado) return alca;
+  if (G) G.aposPintar(estado.ponto, esfera(estado.ponto));
   montaHot(); desenha();
-  await ligaGoogle(); if (fechado) return alca;
+  await pGoogle; if (fechado) return alca;
   raiz.dataset.ready = '1';
   if (/[?&]debug360=1/.test(location.search)) { // (B1) device report for Victor's screenshot
     const d = document.createElement('pre');

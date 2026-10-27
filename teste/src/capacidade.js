@@ -15,6 +15,12 @@
 import { chaveLocal, migraChave } from './predio.js';
 if (typeof localStorage !== 'undefined') { migraChave(localStorage, 'tabela3d-nivel-teto-3'); migraChave(localStorage, 'tabela3d-foto-ativa'); }
 let cache = null;
+// 26/10 ASK 8 (root cause found measuring the site): the alive mark lives in sessionStorage, which every SAME-ORIGIN frame of a tab
+// shares. The site embeds the module twice (hero + block-3 tour): the tour frame found the hero's fresh mark, took it for a crash of
+// its own, stepped the device one tier down (topo -> ios = photo mode with a 240 MB budget, the window filling in 30-40 s) and stored
+// the step: one more step per visit, Google off ('leve') from the 4th visit on (measured in the test browser: tier 'leve' stored). The
+// mark is now per frame: a top page keeps the old key (Hugo's link unchanged); an embedded frame adds its own query to the key.
+const chaveVivo = () => chaveLocal('tabela3d-vivo') + (typeof window !== 'undefined' && window.parent !== window ? '|' + location.search : '');
 // the GPU context was lost (out of GPU memory): one step down for this device, remembered; returns false if already lowest
 export function rebaixar() {
   const ordem = ['leve', 'medio-', 'medio', 'ios', 'topo'], atual = capacidade().nivel, i = ordem.indexOf(atual);
@@ -26,8 +32,8 @@ export function rebaixar() {
 // on a phone can kill a background tab: that is not a crash of ours)
 function vigiaQueda() {
   if (vigiaQueda.ok) return; vigiaQueda.ok = true;
-  const marca = () => { try { if (document.visibilityState === 'visible') sessionStorage.setItem(chaveLocal('tabela3d-vivo'), String(Date.now())); } catch (e) { /* ignore */ } };
-  const tira = () => { try { sessionStorage.removeItem(chaveLocal('tabela3d-vivo')); } catch (e) { /* ignore */ } };
+  const marca = () => { try { if (document.visibilityState === 'visible') sessionStorage.setItem(chaveVivo(), String(Date.now())); } catch (e) { /* ignore */ } };
+  const tira = () => { try { sessionStorage.removeItem(chaveVivo()); } catch (e) { /* ignore */ } };
   marca(); setInterval(marca, 20e3);
   addEventListener('pagehide', tira);
   document.addEventListener('visibilitychange', () => (document.visibilityState === 'visible' ? marca() : tira()));
@@ -39,7 +45,7 @@ export function capacidade() {
   let caiu = false; try { const t = +localStorage.getItem(chaveLocal('tabela3d-foto-ativa')); if (t && Date.now() - t < 3 * 3600e3) caiu = true; localStorage.removeItem(chaveLocal('tabela3d-foto-ativa')); } catch (e) { /* private mode */ }
   // 08/10 (Hugo's brother's iPhone: 'A problem repeatedly occurred' on the unit card): the page itself died with the 3D on.
   // Mark per TAB, refreshed every 20 s while visible, removed on leaving / hiding the page: a fresh mark at load = it crashed.
-  try { const t = +sessionStorage.getItem(chaveLocal('tabela3d-vivo')); if (t && Date.now() - t < 90e3) caiu = true; } catch (e) { /* private mode */ }
+  try { const t = +sessionStorage.getItem(chaveVivo()); if (t && Date.now() - t < 90e3) caiu = true; } catch (e) { /* private mode */ }
   const q = new URLSearchParams(location.search).get('nivel');
   const movel = /Android|iPhone|iPad|Mobi/i.test(navigator.userAgent);
   const ios = /iPhone|iPad/i.test(navigator.userAgent);
@@ -77,7 +83,7 @@ export function capacidade() {
   }[nivel];
   const pw = +new URLSearchParams(location.search).get('pano'); if (pw) T.larguraPano = pw; // tests
   cache = { nivel, movel, mem, gpu, maxTex, ...T, rebaixar };
-  if (caiu && nivel !== 'leve' && !q) { try { sessionStorage.removeItem(chaveLocal('tabela3d-vivo')); } catch (e) { /* ignore */ } if (typeof window !== 'undefined') window.__capacidade = cache; rebaixar(); cache = null; return capacidade(); } // one step down per crash; last step = leve (our city, no Google)
+  if (caiu && nivel !== 'leve' && !q) { try { sessionStorage.removeItem(chaveVivo()); } catch (e) { /* ignore */ } if (typeof window !== 'undefined') window.__capacidade = cache; rebaixar(); cache = null; return capacidade(); } // one step down per crash; last step = leve (our city, no Google)
   if (typeof window !== 'undefined') { window.__capacidade = cache; vigiaQueda(); }
   return cache;
 }

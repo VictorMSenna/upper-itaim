@@ -67,6 +67,11 @@ const FOTO_N = +(typeof location !== 'undefined' && new URLSearchParams(location
 // RODADA 26/10 item 1: coarse first pass over every window face (?gfr=0 = off, ?gferr2= its errorTarget)
 const RAPIDO = !(typeof location !== 'undefined' && new URLSearchParams(location.search).get('gfr') === '0');
 const ERRO_RAPIDO = +(typeof location !== 'undefined' && new URLSearchParams(location.search).get('gferr2')) || ERRO_FOTO * 3;
+// 26/10 ASK 8 (Sites, pub 7: the tour window took 30-40 s to fill, flat dark-blue haze for the first 15-21 s; the bar fell back to
+// ~2 % and vanished at 76 %): the LIVE window (computers) loads in 2 stages - a coarse pass first (errorTarget x FASE1_K, the photo
+// mode's coarse ratio), shown as soon as the window has no pending tile (whole opening covered at that level), then the finest
+// detail refines in place (the renderer keeps a parent until all its children are in). ?g1k=1 = one stage (as before).
+const FASE1_K = +(typeof location !== 'undefined' && new URLSearchParams(location.search).get('g1k')) || 3;
 export const desligadoPorUrl = () => /[?&]google3d=0/.test(location.search);
 async function chaveDaPagina() {
   // 15/10 FILA C6: ?gkey= only on localhost/127.0.0.1 (on the public domain a pasted key in a link is ignored)
@@ -352,7 +357,7 @@ export function iniciarGoogle() {
           for (const c of [...tiles.cameras]) tiles.deleteCamera(c);
           tiles.setCamera(cam);
           const g = tiles.group; if (g.parent !== pai) { g.parent?.remove(g); pai.add(g); }
-          s.dono = quem;
+          s.dono = quem; if (s.ritmoFora) s.ritmoFora(); // ASK 8: the 360 taking the tiles lifts the outside view's slow rhythm
         }
         const g = tiles.group; g.matrixAutoUpdate = false;
         if (!g.matrix.equals(matriz)) { g.matrix.copy(matriz); g.matrixWorldNeedsUpdate = true; if (s.atualizaRecorte) s.atualizaRecorte(); }
@@ -539,7 +544,7 @@ export class VistaGoogle {
     cs.position.copy(this.cam.position); cs.quaternion.copy(this.cam.quaternion); cs.up.copy(this.cam.up);
     cs.fov = fov; cs.aspect = aspect; cs.setViewOffset(W, H, px, py, pw, ph); cs.updateProjectionMatrix(); cs.updateMatrixWorld(true);
     this.janela = { px, py, pw, ph };
-    this.s.tomar(this, this.s.escena, this.matriz, cs, ERRO_360);
+    this.s.tomar(this, this.s.escena, this.matriz, cs, this._fase1 !== false && FASE1_K > 1 ? ERRO_360 * FASE1_K : ERRO_360); // ASK 8: coarse pass first
     this.s.tiles.setResolution(cs, pw, ph); // same pixel density as the full screen (offset narrows the projection)
     const T = this.s.tiles;
     if (dirV && !soCarregar) {
@@ -555,6 +560,7 @@ export class VistaGoogle {
     this.planosPreparar(); const assa = !soCarregar && this._planosPasso(false); this._planosAplica(); // C8b near neighbours
     this.s.escena.updateMatrixWorld(true);
     this.s.tiles.update();
+    this._faseAtualiza();
     if (soCarregar) { const st = this.s.tiles.stats; if (st.queued + st.downloading + st.parsing > 0 || this.s.tiles.loadProgress < 1) this.acordar(); return; }
     const r = this.r, cc = r.getClearColor(new THREE.Color()), ca = r.getClearAlpha();
     const rtAnt = r.getRenderTarget();
@@ -877,18 +883,67 @@ export class VistaGoogle {
   }
   progressoFoto(ver) {
     const el = this.carga, F = this.foto; if (!el || !F) return;
+    // ASK 8: the bar only goes up (F.prog restarts at 0 when the fine regions start after the coarse pass) and shows 100 % before it hides
+    if (F.chave !== this._pFchave) { this._pFchave = F.chave; this._pF = 0; this._pFfim = false; }
+    this._pF = Math.max(this._pF || 0, F.feito ? 1 : F.prog);
+    if (F.feito && !F.fundo && !this._pFfim && !el.hidden) { this._pFfim = true; el.querySelector('b').style.width = '100%'; setTimeout(() => { el.hidden = true; }, 900); return; }
+    if (this._pFfim) return;
     const mostra = ver && !F.feito && !F.fundo; // background faces (other points) load without the bar
     if (el.hidden === mostra) el.hidden = !mostra;
-    if (mostra) el.querySelector('b').style.width = Math.round(4 + 96 * F.prog) + '%';
+    if (mostra) el.querySelector('b').style.width = Math.round(4 + 96 * this._pF) + '%';
   }
   // Discreet progress (Victor 07/10): while the window is on screen and tiles are still arriving, a thin bar fills with the
   // share of this batch already loaded; it hides ~1 s after the queue empties. Coarse tiles are already drawn meanwhile.
   // 0..1 opacity of the Google overlay (fade 0.8 s after it is ready)
   opacidade() { return this.pronto ? Math.min(1, (performance.now() - this.tPronto) / 800) : 0; }
+  // ASK 8: a new point (tour360 aposPintar) starts again at the coarse stage, with a new bar
+  recomeca() {
+    this.pronto = false; this._lote = null; this._quieto = 0;
+    this._fase1 = true; this._t1 = null; this._q1 = 0; this._fim = false;
+    if (this._some) { clearTimeout(this._some); this._some = 0; }
+  }
+  // ASK 8: stage switch, every frame the window view is updated (also while the visitor looks at the room and the window view only
+  // loads). Stage 1 is done when the window has no pending tile for 15 frames (between a tile and its children the queue is empty for a
+  // frame or two) with tiles on screen: the whole opening is covered at the coarse level -> Google fades in, the fine stage starts.
+  // Way out if the queue never settles: 8 s with >= 30 tiles on screen, or a full cache.
+  _faseAtualiza() {
+    if (FASE1_K <= 1) return;
+    const t = this.s.tiles, st = t.stats, pend = st.queued + st.downloading + st.parsing, agora = performance.now();
+    if (this._t1 == null) this._t1 = agora;
+    this._q1 = pend === 0 ? (this._q1 || 0) + 1 : 0;
+    if (this._fase1 === false) return;
+    const quieto = this._q1 >= 15 && (t.loadProgress === undefined || t.loadProgress >= 1 || this._q1 >= 30);
+    if ((st.visible > 0 && quieto) || t.lruCache.isFull() || (agora - this._t1 > 8000 && st.visible >= 30)) {
+      this._fase1 = false; this._q1 = 0; this._fase1ms = Math.round(agora - this._t1);
+      if (!this.pronto) { this.pronto = true; this.tPronto = agora; }
+      this.acordar();
+    }
+  }
   progresso(janelaNaTela) {
     const st = this.s.tiles.stats, pend = st.queued + st.downloading + st.parsing, el = this.carga;
     if (!el) return;
     const barra = el.querySelector('b');
+    if (FASE1_K > 1) {
+      // ASK 8: ONE bar per point, only going up: stage 1 fills 0-60 %, the fine stage 60-100 %; it hides only after 100 % (fine
+      // stage with no pending tile for 15 frames). Tiles that load later (the visitor turns to a new part of the window) load
+      // without a bar: the window already shows Google.
+      if (this._fim) return;
+      if (!this._lote) this._lote = { base: st.loaded, p: 0, b2: null };
+      const Lt = this._lote;
+      let f;
+      if (this._fase1 !== false) { const fe = Math.max(0, st.loaded - Lt.base); f = pend > 0 ? 0.6 * fe / (fe + pend) : Lt.p; }
+      else { if (Lt.b2 == null) Lt.b2 = st.loaded; const fe = Math.max(0, st.loaded - Lt.b2); f = 0.6 + 0.4 * (pend > 0 ? fe / (fe + pend) : 1); }
+      Lt.p = Math.max(Lt.p, Math.min(f, this._fase1 !== false ? 0.6 : 0.99));
+      const ver = !!janelaNaTela;
+      if (this._fase1 === false && this._q1 >= 15 && (this.s.tiles.loadProgress === undefined || this.s.tiles.loadProgress >= 1 || this._q1 >= 30)) {
+        this._fim = true; barra.style.width = '100%';
+        this._some = setTimeout(() => { el.hidden = true; this._some = 0; }, 900);
+        return;
+      }
+      if (el.hidden === ver) el.hidden = !ver;
+      if (ver) barra.style.width = Math.round(4 + 96 * Lt.p) + '%';
+      return;
+    }
     if (pend > 0) {
       if (!this._lote) this._lote = { base: st.loaded, p: 0 };
       const feitos = Math.max(0, st.loaded - this._lote.base);
@@ -1199,11 +1254,27 @@ export async function ligarGoogleCena({ scene, camera, renderer, ref, aoMudar, e
   // level. Any frame that finds pending work keeps asking for frames until the queues are empty for a while.
   let laco = 0, quieto = 0;
   const pendente = () => { const st = tiles.stats; return st.queued + st.downloading + st.parsing > 0 || tiles.loadProgress < 1; };
+  // 26/10 ASK 8 (Sites: the hero and the block-3 tour are two module iframes = two tile sets; the hero went on refining ~200-300 MB
+  // while the visitor was already at the tour, whose window waited behind it): EMBEDDED only (window.parent !== window), once Google's
+  // city is on screen and the outside view owns the tiles, a page scrolled out of view downloads with 2 parallel requests instead of
+  // 30 and stops asking for frames; back in view it resumes at once. A standalone page (Hugo's link) is always in view: unchanged.
+  // ?gpausa=0 = off (tests).
+  let foraDaTela = false;
+  const fila = tiles.downloadQueue, campoFila = fila && ('maxJobsPerOrigin' in fila ? 'maxJobsPerOrigin' : 'maxJobs'), filaMax = fila ? fila[campoFila] : 30;
+  s.ritmoFora = () => { if (!fila) return; const lento = foraDaTela && mostrando && (!s.dono || s.dono === api); const v = lento ? 2 : filaMax; if (fila[campoFila] !== v) fila[campoFila] = v; };
   const bombear = () => {
     quieto = 0; if (laco || falhou) return;
-    const passo = () => { laco = 0; if (falhou) return; aoMudar && aoMudar(); quieto = pendente() ? 0 : quieto + 1; if (quieto < 30 && !laco) laco = requestAnimationFrame(passo); };
+    const passo = () => { laco = 0; if (falhou) return; if (foraDaTela && mostrando && (!s.dono || s.dono === api)) return; aoMudar && aoMudar(); quieto = pendente() ? 0 : quieto + 1; if (quieto < 30 && !laco) laco = requestAnimationFrame(passo); };
     laco = requestAnimationFrame(passo);
   };
+  if (typeof window !== 'undefined' && window.parent !== window && typeof IntersectionObserver !== 'undefined' && !/[?&]gpausa=0/.test(location.search)) {
+    new IntersectionObserver((ents) => {
+      const fora = !ents.some((x) => x.isIntersecting);
+      if (fora === foraDaTela) return;
+      foraDaTela = fora; s.ritmoFora();
+      if (!fora) bombear();
+    }).observe(document.documentElement);
+  }
   const api = {
     tiles, perf: { n: 0, ms: 0 }, get mostrando() { return mostrando && !falhou; },
     // call once per frame before renderer.render()
@@ -1241,7 +1312,7 @@ export async function ligarGoogleCena({ scene, camera, renderer, ref, aoMudar, e
           carga.querySelector('b').style.width = Math.round(4 + 96 * pMax) + '%';
           // Google replaces our city when its view is 85% there, complete, or when this device's memory budget is full
           // (on mid phones the budget fills before 'complete': it never switched - Victor 07/10 21h50)
-          if (st.visible > 8 && (pend === 0 || pMax >= 0.85 || tiles.lruCache.isFull())) { mostrando = true; carga.remove(); cred.hidden = !!api.noite; }
+          if (st.visible > 8 && (pend === 0 || pMax >= 0.85 || tiles.lruCache.isFull())) { mostrando = true; carga.remove(); cred.hidden = !!api.noite; s.ritmoFora(); }
         }
         if (refino) {
           if (refino.lote0 == null) refino.lote0 = st.loaded;
