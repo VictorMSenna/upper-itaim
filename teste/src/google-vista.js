@@ -186,7 +186,7 @@ const LUZ_GLSL = `
           vec3 t1 = (vec3(-a.z, b.z, -a.w) - o) * iD, t2 = (vec3(a.z, b.w, a.w) - o) * iD;
           vec3 tn = min(t1, t2), tf = max(t1, t2);
           float tE = max(max(tn.x, tn.y), tn.z), tS = min(min(tf.x, tf.y), tf.z);
-          if (!(tE > tS || tE <= 0.0 || tn.y >= max(tn.x, tn.z)) && abs(nB.y) < 0.75) { bool fxM = tn.x >= tn.z; vec3 PM = o + tE * D; mapaOk = 1.0; mapaU = fxM ? PM.z : PM.x; mapaH = PM.y;
+          if (!(tE > tS || tE <= 0.0 || tn.y >= max(tn.x, tn.z)) && abs(nB.y) < 0.75 && abs(dot(normalize(nB.xz + 1e-6), tn.x >= tn.z ? e1 : e2)) > 0.35) { bool fxM = tn.x >= tn.z; vec3 PM = o + tE * D; mapaOk = 1.0; mapaU = fxM ? PM.z : PM.x; mapaH = PM.y;
             mapaRow = float(i) * 4.0 + (fxM ? (PM.x > 0.0 ? 0.0 : 1.0) : (PM.z > 0.0 ? 2.0 : 3.0)); }
           if (tE > tS || tE <= 0.0 || tn.y >= max(tn.x, tn.z) || abs(nB.y) > 0.6) break; // missed the box, entered by the roof, or an up-facing fragment
           bool fx = tn.x >= tn.z;
@@ -267,23 +267,26 @@ const LUZ_GLSL = `
               float hA = g3dH21(idJ), hB = g3dH21(idJ + 7.3), hC = g3dH21(idJ + 19.1);
               float mul = step(1.25, pA.w) * (1.0 - smoothstep(0.02, 0.02 + aa.x, abs(lu - (hB - 0.5) * 0.25 * pA.w))); // a mullion on wide windows
               float hr = uJanHora / 60.0; hr = hr < 12.0 ? hr + 24.0 : hr;
-              float occ = hr < 19.0 ? mix(0.30, 0.45, clamp((hr - 17.0) / 2.0, 0.0, 1.0)) : hr < 21.0 ? mix(0.45, 0.38, (hr - 19.0) / 2.0) : hr < 23.0 ? mix(0.38, 0.22, (hr - 21.0) / 2.0) : hr < 26.0 ? mix(0.22, 0.08, (hr - 23.0) / 3.0) : 0.08;
+              float occ = hr < 19.0 ? mix(0.4, 0.62, clamp((hr - 17.0) / 2.0, 0.0, 1.0)) : hr < 21.0 ? mix(0.62, 0.58, (hr - 19.0) / 2.0) : hr < 23.0 ? mix(0.58, 0.36, (hr - 21.0) / 2.0) : hr < 26.0 ? mix(0.36, 0.12, (hr - 23.0) / 3.0) : 0.12; // of the eligible cells (27/10 Meta: ~30-40 % of the real window cells at 21 h)
               float liga = tem * step(hA, occ${typeof location !== 'undefined' && /[?&]jantodas=1/.test(location.search) ? ' * 0.0 + 1.0' : ''});
-              // interior colour: warm 2700-3500 K (70 %), neutral/cool 4000-5500 K (20 %), dim (10 %)
-              vec3 quente = mix(vec3(1.0, 0.62, 0.32), vec3(1.0, 0.76, 0.52), hC);
-              vec3 fria = mix(vec3(1.0, 0.88, 0.74), vec3(0.86, 0.9, 1.0), hC);
-              vec3 corW = hB < 0.70 ? quente : hB < 0.90 ? fria : quente * 0.35;
-              float forcaW = (0.55 + 0.45 * g3dH21(idJ + 3.7)) * (hB >= 0.90 ? 1.0 : 1.0);
-              float yv = clamp(lh / max(2.0 * hh, 1e-3) + 0.5, 0.0, 1.0);
-              float grad = g3dH21(idJ + 11.0) < 0.6 ? mix(0.72, 1.08, yv) : mix(1.05, 0.8, yv); // ceiling light / curtain lit from below
-              // a curtain drawn over part of ~1/3 of the windows (lit through it: dimmer, a touch warmer), from the left or the right
-              float temCort = step(g3dH21(idJ + 23.0), 0.35), ladoC = g3dH21(idJ + 29.0) < 0.5 ? -1.0 : 1.0, fracC = 0.3 + 0.4 * g3dH21(idJ + 31.0);
-              float cort = temCort * smoothstep(-aa.x, aa.x, ladoC * lu - hw * (1.0 - 2.0 * fracC));
-              vec3 luzW = corW * forcaW * grad * (1.0 - 0.75 * mul) * mix(1.0, 0.5, cort) * mix(vec3(1.0), vec3(1.0, 0.85, 0.7), cort);
-              float ver = ${typeof location !== 'undefined' && /[?&]jangrade=1/.test(location.search) ? '1.0' : '0.0'}; // ?jangrade=1 (tests): every mapped window outlined
-              outgoingLight = mix(outgoingLight, outgoingLight * 0.55, uNoiteG * tem * (fora - vidro)); // frame: darker than the wall
-              outgoingLight = mix(outgoingLight, luzW * 1.15, uNoiteG * liga * vidro);
-              outgoingLight = mix(outgoingLight, vec3(0.0, 1.0, 0.0), ver * tem * (fora - vidro));
+              // 27/10 Meta (2x/4x of v1: 'flat cream squares'): the variation of Hobbs' photo, in the far city's palette. Colour by hash:
+              // warm orange 35 %, warm 30 %, yellow-white 17 %, white 10 %, cool 8 %; brightness 0.4-1.2 x (a few 1.4 x); a top-to-
+              // bottom curtain gradient on ~1/3, a mild ceiling gradient on the rest, a side curtain on ~1/5; soft edges; a faint halo.
+              vec3 corW = hB < 0.35 ? mix(vec3(1.0, 0.58, 0.26), vec3(1.0, 0.68, 0.36), hC) : hB < 0.65 ? vec3(1.0, 0.72, 0.42) : hB < 0.82 ? mix(vec3(0.98, 0.84, 0.58), vec3(0.98, 0.9, 0.7), hC) : hB < 0.92 ? vec3(0.95, 0.9, 0.82) : mix(vec3(0.78, 0.86, 1.0), vec3(0.86, 0.92, 1.0), hC);
+              float hF = g3dH21(idJ + 3.7), forcaW = 0.4 + 0.8 * pow(hF, 1.3); forcaW *= hF > 0.95 ? 1.4 : 1.0;
+              float yv = clamp(lh / max(2.0 * hh, 1e-3) + 0.5, 0.0, 1.0); // 0 bottom .. 1 top
+              float hG = g3dH21(idJ + 11.0);
+              float grad = hG < 0.34 ? mix(1.05, 0.45, yv) : hG < 0.5 ? mix(0.5, 1.05, yv) : mix(0.88, 1.0, yv); // curtain lit from below / from above; mild ceiling light
+              float temCort = step(g3dH21(idJ + 23.0), 0.2), ladoC = g3dH21(idJ + 29.0) < 0.5 ? -1.0 : 1.0, fracC = 0.3 + 0.4 * g3dH21(idJ + 31.0);
+              float cort = temCort * smoothstep(-aa.x * 1.6, aa.x * 1.6, ladoC * lu - hw * (1.0 - 2.0 * fracC));
+              vec3 luzW = corW * forcaW * grad * (1.0 - 0.6 * mul) * mix(1.0, 0.55, cort);
+              float vidroM = smoothstep(-aa.x * 1.6, aa.x * 1.6, hw - fr - abs(lu)) * smoothstep(-aa.y * 1.6, aa.y * 1.6, hh - fr - abs(lh)); // softer edge
+              float dF = length(max(vec2(abs(lu) - hw, abs(lh) - hh), vec2(0.0))), halo = (1.0 - fora) * exp(-dF / 0.2) * step(dF, 0.6);
+              float ver = ${typeof location !== 'undefined' && /[?&]jangrade=1/.test(location.search) ? '1.0' : '0.0'}; // ?jangrade=1 (tests): every grid cell outlined, green = may light, red = excluded
+              outgoingLight = mix(outgoingLight, outgoingLight * 0.7, uNoiteG * tem * (fora - vidro)); // frame: darker than the wall
+              outgoingLight = mix(outgoingLight, luzW, uNoiteG * liga * vidroM);
+              outgoingLight += uNoiteG * liga * halo * corW * forcaW * 0.12;
+              outgoingLight = mix(outgoingLight, mix(vec3(1.0, 0.0, 0.0), vec3(0.0, 1.0, 0.0), tem), ver * (fora - vidro));
             }
           }
         }
