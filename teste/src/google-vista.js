@@ -480,8 +480,11 @@ export class VistaGoogle {
     this.resW = w; this.resH = h; // REAL drawing-buffer size (dpr included), not the scaled target
   }
   // window mask (pano equirect, bitmap row 0 = v 0 as loaded by render-mix) -> list of scene-frame directions where it is open
+  // ASK 8: the window view now starts while the panorama layers are still loading; until a layer is in, its texture's image is not
+  // drawable (measured on TEST, entering the tour from the outside view: drawImage threw and Google was turned off for the visit)
+  static desenhavel(img) { return !!img && ((typeof HTMLImageElement !== 'undefined' && img instanceof HTMLImageElement && img.naturalWidth > 0) || (typeof HTMLCanvasElement !== 'undefined' && img instanceof HTMLCanvasElement) || (typeof ImageBitmap !== 'undefined' && img instanceof ImageBitmap) || (typeof OffscreenCanvas !== 'undefined' && img instanceof OffscreenCanvas)); }
   definirMascara(img) {
-    if (!img || img === this.mascaraFonte) return;
+    if (!VistaGoogle.desenhavel(img) || img === this.mascaraFonte) return;
     this.mascaraFonte = img;
     const W = 256, H = 128, c = document.createElement('canvas'); c.width = W; c.height = H;
     const g = c.getContext('2d', { willReadFrequently: true }); g.drawImage(img, 0, 0, W, H);
@@ -496,7 +499,7 @@ export class VistaGoogle {
   // 13/10 (R3b): the facade glass seen from the balcony gets its own direction list, so the mirror is drawn whenever the
   // GLASS is on screen, also when the window is on screen at the same time (before: window on screen = no city in the glass)
   definirVidro(img) {
-    if (!img || img === this.vidroFonte) return;
+    if (!VistaGoogle.desenhavel(img) || img === this.vidroFonte) return;
     this.vidroFonte = img;
     const W = 256, H = 128, c = document.createElement('canvas'); c.width = W; c.height = H;
     const g = c.getContext('2d', { willReadFrequently: true }); g.drawImage(img, 0, 0, W, H);
