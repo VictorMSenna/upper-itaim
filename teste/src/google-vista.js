@@ -167,6 +167,7 @@ const LUZ_GLSL = `
       // of the wall the camera ray enters the box by (slab test; a roof entry or an up-facing fragment = no window), ground floor and the
       // last 1.5 m under the roof skipped. The same rectangle is thus hit by every pixel of the window, whichever triangle they are on.
       float janT = -1.0; vec2 celT = vec2(0.0);
+      float uT = 0.0, hT = 0.0, uST = 0.0, bayT = 3.1, hbT = 0.0; vec2 clT = vec2(0.0); float boxT = 0.0, faceT = 0.0; // JANELAS-COMBINADAS
       if (uJanN > 0.5 && uPertoJ < 0.5) {
         vec3 camN = (uParaB5 * vec4(cameraPosition, 1.0)).xyz;
         for (int i = 0; i < 32; i++) {
@@ -185,23 +186,43 @@ const LUZ_GLSL = `
           float tE = max(max(tn.x, tn.y), tn.z), tS = min(min(tf.x, tf.y), tf.z);
           if (tE > tS || tE <= 0.0 || tn.y >= max(tn.x, tn.z) || abs(nB.y) > 0.6) break; // missed the box, entered by the roof, or an up-facing fragment
           bool fx = tn.x >= tn.z;
+          // 27/10: no per-fragment flat-facade gate: a window is a whole rectangle in wall coordinates, found once per cell in the photo (the gate cut it at pillars)
           if ((fx ? abs(abs(q.x) - a.z) : abs(abs(q.y) - a.w)) > 3.0) break; // the fragment is not on that wall (lower houses inside a block rectangle made flecks)
           vec3 P = o + tE * D;
           float ao = fx ? a.w : a.z, u = fx ? P.z : P.x;
           float nb = max(1.0, floor(2.0 * ao / 3.1)), bay = 2.0 * ao / nb;
           vec2 cc = vec2((u + ao) / bay, (P.y - b.z) / 2.85), fr = fract(cc), cl = floor(cc);
           float dentro = step(0.6, cl.x * bay) * step(0.6, 2.0 * ao - (cl.x + 1.0) * bay) * step(1.0, cl.y) * step(b.z + (cl.y + 1.0) * 2.85, b.w - 1.0); // whole cells only (a cell cut by the roof line or a corner made slivers)
-          janT = dentro * smoothstep(0.22, 0.26, fr.x) * (1.0 - smoothstep(0.74, 0.78, fr.x)) * smoothstep(0.34, 0.38, fr.y) * (1.0 - smoothstep(0.84, 0.88, fr.y));
+          janT = dentro; uT = u; hT = P.y; uST = -ao + cl.x * bay; bayT = bay; hbT = b.z + cl.y * 2.85; clT = cl; boxT = float(i);
+          faceT = fx ? (P.x > 0.0 ? 0.0 : 1.0) : (P.z > 0.0 ? 2.0 : 3.0);
           celT = cl + vec2(float(i) * 37.0 + (fx ? 0.0 : 17.0) + ((fx ? P.x : P.z) > 0.0 ? 5.0 : 0.0), 0.0);
           break;
         }
       }
-      if (janT >= 0.0) {${typeof location !== 'undefined' && /[?&]janpdbg=1/.test(location.search) ? ' outgoingLight = cB * 0.35 + vec3(0.0, janT, 0.6 * step(janT, 0.0));' : ''} // ?janpdbg=1 (tests): blue = footprint building, green = window cell
-        float acesaT = step(g3dH21(celT), uFracG) * janT;
-        float vidroT = 1.0 - smoothstep(0.18, 0.5, dot(cB, vec3(0.2126, 0.7152, 0.0722)));
-        vec3 quenteT = mix(vec3(1.0, 0.72, 0.42), vec3(0.95, 0.9, 0.82), step(0.82, g3dH21(celT + 7.0)));
-        float forcaT = 0.12 + 0.88 * pow(g3dH21(celT + 3.0), 2.2);
-        outgoingLight += uNoiteG * acesaT * mix(0.75, 1.0, vidroT) * quenteT * forcaT * 0.85;
+      // JANELAS-COMBINADAS 27/10 (Meta: the wall-plane cards sat between Google's openings; the openings alone were dots and specks).
+      // Per lit cell (floor x bay of the LiDAR wall): the OPENING is found in Google's own facade photo - 9 samples along the bay at
+      // window height and 5 up the floor, mapped from wall metres to texture through the screen derivatives - and its centroid gives
+      // the position; the SIZE is a standard window, 1.3 x 1.4 m, sill 0.9 m above the floor line (centre from the photo, clamped
+      // +-0.4 m), drawn on the wall plane with a ~1.5 px soft edge, in the far city's warm colour and night ramp. Ambiguous cells (no
+      // clear dark opening, a wide dark band, no wall above / below) draw nothing.
+      float fwU = 1.5 * fwidth(uT), fwH = 1.5 * fwidth(hT);
+      if (janT >= 0.0) {
+        float aJ = 0.0, dbgJ = 0.0;
+        if (janT > 0.5 && uJanDetOk > 0.5 && clT.x < 128.0 && clT.y < 32.0) {
+          vec4 dt = texelFetch(uJanDet, ivec2(int(clT.x), int((boxT * 4.0 + faceT) * 32.0 + clT.y)), 0);
+          dbgJ = dt.a > 0.0 ? (dt.r > 0.0 ? 1.0 : 0.5) : 0.0;
+          if (dt.r > 0.0) {
+            float hwJ = ${typeof location !== 'undefined' && /[?&]janmed=1/.test(location.search) ? 'clamp(dt.r * 1.5, 0.3, 0.75)' : '0.6'}, hhJ = ${typeof location !== 'undefined' && /[?&]janmed=1/.test(location.search) ? 'clamp(dt.a * 1.5, 0.35, 0.75)' : '0.65'}; // half width / height: standard 1.2 x 1.3 m, or the measured opening (?janmed=1)
+            float uc = uST + dt.g * bayT, y = hT - (hbT + dt.b * 2.85) + hhJ;
+            float x = uT - uc;
+            aJ = smoothstep(-hwJ - fwU, -hwJ + fwU, x) * (1.0 - smoothstep(hwJ - fwU, hwJ + fwU, x)) * smoothstep(-fwH, fwH, y) * (1.0 - smoothstep(2.0 * hhJ - fwH, 2.0 * hhJ + fwH, y));
+          }
+        }
+        ${typeof location !== 'undefined' && /[?&]janpdbg=1/.test(location.search) ? ' outgoingLight = cB * 0.35 + vec3(aJ, 0.4 * dbgJ, 0.6 * step(janT, 0.0));' : ''} // ?janpdbg=1: blue = footprint building, dim green = cell tested, bright green = opening found, red = window
+        float acesaT = step(g3dH21(celT), min(1.0, uFracG * 1.8)) * aJ${typeof location !== 'undefined' && /[?&]janoff=1/.test(location.search) ? ' * 0.0' : ''};
+        float forcaT = 0.6 + 0.4 * g3dH21(celT + 3.0);
+        vec3 corJ = vec3(1.0, 0.72, 0.42) * forcaT * (0.8 + 0.4 * (1.0 - smoothstep(0.05, 0.4, dot(cB, vec3(0.2126, 0.7152, 0.0722)))));
+        outgoingLight = mix(outgoingLight, corJ * uNoiteG * 0.9, acesaT * min(1.0, uNoiteG * 1.5));
       } else if (!verde && altoJ && abs(nB.y) < 0.3 && hLocJ > 9.0 && vB5.y > 3.5) { // 9 m (3rd floor up): the walls/parapets of the 1-2 storey houses below (prints) got shards
         // window grid along the facade. 08/10 (Victor: 'triangulos, varios formatos'): Google's mesh is a patchwork of
         // triangles with their own normals, so a grid following each triangle's normal broke every window into shards. The
@@ -413,7 +434,7 @@ export function iniciarGoogle() {
       s.tomar = (quem, pai, matriz, cam, erro) => {
         if (s.dono !== quem) {
           if (s.dono && s.dono.restauraCache) s.dono.restauraCache(); // the 360 photo freed the tiles: the next view gets its budget back
-          s._recFeito = false; if (s.recorte) { s.recorte.vizN.value = 0; s.recorte.perto.value = 0; s.recorte.janN.value = 0; s.recorte.mapaR.value.w = 0; s.recorte.ret.value.set(1, 1, 0, 0); } // building ghosts only in the outside view (cena3d turns them on)
+          s._recFeito = false; if (s.recorte) { s.recorte.vizN.value = 0; s.recorte.perto.value = 0; s.recorte.janN.value = 0; s.recorte.janDetOk.value = 0; s.recorte.mapaR.value.w = 0; s.recorte.ret.value.set(1, 1, 0, 0); } // building ghosts only in the outside view (cena3d turns them on)
           for (const c of [...tiles.cameras]) tiles.deleteCamera(c);
           tiles.setCamera(cam);
           const g = tiles.group; if (g.parent !== pai) { g.parent?.remove(g); pai.add(g); }
@@ -434,18 +455,18 @@ export function iniciarGoogle() {
       // fragments inside the rectangle and nearer than the tower are dropped (x0 > x1 = off, e.g. in the 360)
       s.recorte = { liga: { value: 0 }, min: { value: new THREE.Vector3() }, max: { value: new THREE.Vector3() }, paraB5: { value: new THREE.Matrix4() }, ecefParaB5: null,
         ret: { value: new THREE.Vector4(1, 1, 0, 0) }, prof: { value: 0 },
-        luz: { value: new THREE.Vector3(1, 1, 1) }, noite: { value: 0 }, frac: { value: 0.25 }, perto: { value: 0 }, janB: { value: Array.from({ length: 64 }, () => new THREE.Vector4()) }, janN: { value: 0 }, grade: { value: new THREE.Vector4(1, 1, 1, 0.18) }, nit: { value: C8.nitidez }, viz: { value: Array.from({ length: 16 }, () => new THREE.Vector4()) }, vizN: { value: 0 },
+        luz: { value: new THREE.Vector3(1, 1, 1) }, noite: { value: 0 }, frac: { value: 0.25 }, perto: { value: 0 }, janB: { value: Array.from({ length: 64 }, () => new THREE.Vector4()) }, janN: { value: 0 }, janDet: { value: null }, janDetOk: { value: 0 }, grade: { value: new THREE.Vector4(1, 1, 1, 0.18) }, nit: { value: C8.nitidez }, viz: { value: Array.from({ length: 16 }, () => new THREE.Vector4()) }, vizN: { value: 0 },
         mapa: { value: null }, mapaR: { value: new THREE.Vector4(0, 0, 0, 0) }, camB5: { value: new THREE.Vector3() }, alvoB5: { value: new THREE.Vector3() },
         terr: { value: null }, terrExt: { value: 0 }, ang: { value: null }, angExt: { value: 0 }, lote: { value: Array.from({ length: 24 }, () => new THREE.Vector2()) }, loteN: { value: 0 } };
       const shaderRecorte = (sh) => {
         sh.uniforms.uLote = s.recorte.lote; sh.uniforms.uLoteN = s.recorte.loteN; sh.uniforms.uRecLiga = s.recorte.liga; sh.uniforms.uRecMin = s.recorte.min; sh.uniforms.uRecMax = s.recorte.max; sh.uniforms.uParaB5 = s.recorte.paraB5;
         sh.uniforms.uRet = s.recorte.ret; sh.uniforms.uProf = s.recorte.prof;
-        sh.uniforms.uLuz = s.recorte.luz; sh.uniforms.uNoiteG = s.recorte.noite; sh.uniforms.uFracG = s.recorte.frac; sh.uniforms.uPertoJ = s.recorte.perto; sh.uniforms.uJanB = s.recorte.janB; sh.uniforms.uJanN = s.recorte.janN; sh.uniforms.uGrade = s.recorte.grade; sh.uniforms.uNitG = s.recorte.nit; sh.uniforms.uViz = s.recorte.viz; sh.uniforms.uVizN = s.recorte.vizN;
+        sh.uniforms.uLuz = s.recorte.luz; sh.uniforms.uNoiteG = s.recorte.noite; sh.uniforms.uFracG = s.recorte.frac; sh.uniforms.uPertoJ = s.recorte.perto; sh.uniforms.uJanB = s.recorte.janB; sh.uniforms.uJanN = s.recorte.janN; sh.uniforms.uJanDet = s.recorte.janDet; sh.uniforms.uJanDetOk = s.recorte.janDetOk; sh.uniforms.uGrade = s.recorte.grade; sh.uniforms.uNitG = s.recorte.nit; sh.uniforms.uViz = s.recorte.viz; sh.uniforms.uVizN = s.recorte.vizN;
         sh.uniforms.uMapaP = s.recorte.mapa; sh.uniforms.uMapaR = s.recorte.mapaR; sh.uniforms.uCamB5 = s.recorte.camB5; sh.uniforms.uAlvoB5 = s.recorte.alvoB5;
         sh.uniforms.uTerr = s.recorte.terr; sh.uniforms.uTerrExt = s.recorte.terrExt; sh.uniforms.uAng = s.recorte.ang; sh.uniforms.uAngExt = s.recorte.angExt;
         sh.vertexShader = 'uniform mat4 uParaB5;\nvarying vec3 vB5;\nvarying float vProf;\n' + sh.vertexShader.replace('#include <project_vertex>', '#include <project_vertex>\nvB5 = (uParaB5 * modelMatrix * vec4(transformed, 1.0)).xyz;\nvProf = -mvPosition.z;');
         sh.fragmentShader = 'uniform mat4 uParaB5;\nuniform vec2 uLote[24];\nuniform float uLoteN;\nbool g3dNoLote(vec2 p) { bool d = false; for (int i = 0; i < 24; i++) { if (float(i) >= uLoteN) break; vec2 a = uLote[i], b = uLote[i + 1 < 24 ? i + 1 : 0]; if (float(i + 1) >= uLoteN) b = uLote[0]; if ((a.y > p.y) != (b.y > p.y) && p.x < (b.x - a.x) * (p.y - a.y) / (b.y - a.y) + a.x) d = !d; } return d; }\nuniform float uRecLiga;\nuniform vec3 uRecMin;\nuniform vec3 uRecMax;\nuniform vec4 uRet;\nuniform float uProf;\nvarying vec3 vB5;\nvarying float vProf;\n'
-          + 'uniform vec4 uGrade;\nuniform float uNitG;\nuniform vec4 uViz[16];\nuniform float uVizN;\nbool g3dNoViz(vec3 p) { for (int i = 0; i < 8; i++) { if (float(i) >= uVizN) break; vec4 a = uViz[2 * i], b = uViz[2 * i + 1]; vec2 d = p.xz - a.xy; vec2 q = vec2(dot(d, b.xy), dot(d, vec2(-b.y, b.x))); if (abs(q.x) < a.z && abs(q.y) < a.w && p.y > b.z && p.y < b.w) return true; } return false; }\n' + GRADE_GLSL + 'uniform vec3 uLuz;\nuniform float uNoiteG;\nuniform float uFracG;\nuniform float uPertoJ;\nuniform vec4 uJanB[64];\nuniform float uJanN;\nuniform sampler2D uAng;\nuniform float uAngExt;\nfloat g3dH21(vec2 p) { p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }\n'
+          + 'uniform vec4 uGrade;\nuniform float uNitG;\nuniform vec4 uViz[16];\nuniform float uVizN;\nbool g3dNoViz(vec3 p) { for (int i = 0; i < 8; i++) { if (float(i) >= uVizN) break; vec4 a = uViz[2 * i], b = uViz[2 * i + 1]; vec2 d = p.xz - a.xy; vec2 q = vec2(dot(d, b.xy), dot(d, vec2(-b.y, b.x))); if (abs(q.x) < a.z && abs(q.y) < a.w && p.y > b.z && p.y < b.w) return true; } return false; }\n' + GRADE_GLSL + 'uniform vec3 uLuz;\nuniform float uNoiteG;\nuniform float uFracG;\nuniform float uPertoJ;\nuniform vec4 uJanB[64];\nuniform float uJanN;\nuniform sampler2D uJanDet;\nuniform float uJanDetOk;\nuniform sampler2D uAng;\nuniform float uAngExt;\nfloat g3dH21(vec2 p) { p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }\n'
           + FANT_GLSL
           + sh.fragmentShader.replace('#include <map_fragment>', NIT_GLSL).replace('#include <opaque_fragment>', LUZ_GLSL + '\n#include <opaque_fragment>').replace('void main() {',
           'void main() {\n  if (uRecLiga > 0.5 && all(greaterThan(vB5, uRecMin)) && all(lessThan(vB5, uRecMax))) discard;\n  if (uRecLiga > 0.5 && uLoteN > 2.5 && vB5.y > uRecMin.y && vB5.y < uRecMax.y && g3dNoLote(vB5.xz)) discard;\n  if (g3dFantasma(vB5)) discard;\n#ifndef G3D_PLANO\n  if (uVizN > 0.5 && g3dNoViz(vB5)) discard;\n#endif');
@@ -574,12 +595,12 @@ export class VistaGoogle {
     this.dirsV = new Float32Array(out);
   }
   // JANELAS-PLANOS: the near LiDAR boxes (vizinhos-planos.json) around this eye -> uJanB (32 nearest, < 260 m, height >= 6 m,
-  // rectangle fill >= 0.7; up to 32 boxes). Recomputed when the eye moves (another point / unit). ?janplanos=0 = off (the old per-triangle rule).
+  // rectangle fill >= 0.7; up to 32 boxes). Recomputed when the eye moves (another point / unit). 27/10: only with ?janplanos=1 (not approved yet).
   _janPlanos() {
     const R = this.s.recorte;
-    if (!R.janB || !R.ecefParaB5 || !this.matriz || (typeof location !== 'undefined' && /[?&]janplanos=0/.test(location.search))) { if (R.janN) R.janN.value = 0; return; }
+    if (!R.janB || !R.ecefParaB5 || !this.matriz || (typeof location !== 'undefined' && !/[?&]janplanos=1/.test(location.search))) { if (R.janN) R.janN.value = 0; return; } // 27/10: OPT-IN (?janplanos=1) until Meta approves the near windows; default = pub 9 rule (none under 150 m)
     const chave = this.matriz.elements.map((x) => x.toFixed(2)).join(',');
-    if (this._janChave === chave) { R.janN.value = this._janN || 0; return; }
+    if (this._janChave === chave) { R.janN.value = this._janN || 0; R.janDetOk.value = this._janDet ? 1 : 0; if (this._janDet) R.janDet.value = this._janDet.tex; return; }
     this._janChave = chave; this._janN = 0; R.janN.value = 0;
     if (!PLANOS_DADOS) PLANOS_DADOS = fetch('assets/entorno/vizinhos-planos.json').then((r) => (r.ok ? r.json() : null)).catch(() => null);
     PLANOS_DADOS.then((D) => {
@@ -590,10 +611,70 @@ export class VistaGoogle {
         const qx = dx * c + dz * s, qz = -dx * s + dz * c; return Math.hypot(Math.max(Math.abs(qx) - p.h[0], 0), Math.max(Math.abs(qz) - p.h[1], 0)); };
       const sel = D.partes.filter((p) => p.fill >= 0.7 && p.y[1] - p.y[0] >= 6).map((p) => ({ p, d: dist(p) })).filter((x) => x.d < 260 && x.d > 2).sort((a, b) => a.d - b.d).slice(0, 32);
       sel.forEach(({ p }, i) => { R.janB.value[2 * i].set(p.c[0], p.c[1], p.h[0], p.h[1]); R.janB.value[2 * i + 1].set(Math.cos(p.a), Math.sin(p.a), p.y[0], p.y[1]); });
+      this._janSel = sel.map((x) => x.p); this._janDet = null; // JANELAS-COMBINADAS: detection redone for this eye
       this._janN = sel.length; if (this.s.dono === this) R.janN.value = sel.length;
       if (typeof window !== 'undefined') window.__g3dJanPlanos = { olho: olho.toArray().map((x) => +x.toFixed(1)), n: sel.length, ids: sel.map((x) => x.p.id + ':' + x.d.toFixed(0)) };
       this.acordar();
     });
+  }
+  // JANELAS-COMBINADAS 27/10: per cell of the near LiDAR walls, find Google's window opening ONCE (not per fragment: per-fragment texture
+  // lookups gave a different answer on every triangle). When the live window view has settled, the city is drawn once more with neutral
+  // light into a small target, read back IN MEMORY (never stored), and each cell visible in it is tested: 9 samples along the bay at
+  // window height and 5 up the floor; an opening = clearly darker than the wall (< 0.62 x), not a wide dark band (<= 4 of 9 dark), wall
+  // above and below. Result per cell (found, centre along the bay, centre height) in a 128 x 4096 texture read by the tile shader, which
+  // draws a standard window (1.2 x 1.3 m) centred there. Cells never seen or ambiguous stay unlit. Rotating the view re-tests new cells.
+  _janDetecta() {
+    const R = this.s.recorte, S = this._janSel; if (!S || !R.ecefParaB5 || !this.rt) return;
+    const W = Math.min(1600, this.larg), H = Math.max(2, Math.round(W * this.alt / this.larg));
+    if (!this._detRT || this._detRT.width !== W || this._detRT.height !== H) { if (this._detRT) this._detRT.dispose(); this._detRT = new THREE.WebGLRenderTarget(W, H, { type: THREE.UnsignedByteType, depthBuffer: true, generateMipmaps: false }); }
+    const r = this.r, ant = r.getRenderTarget(), cc = r.getClearColor(new THREE.Color()), ca = r.getClearAlpha();
+    const luz0 = R.luz.value.clone(), noite0 = R.noite.value, grade0 = R.grade.value.clone();
+    R.luz.value.set(1, 1, 1); R.noite.value = 0; R.grade.value.set(1, 1, 1, 0.18);
+    r.setRenderTarget(this._detRT); r.setClearColor(0x000000, 0); r.clear(); r.render(this.s.escena, this.cam);
+    const px = new Uint8Array(W * H * 4); r.readRenderTargetPixels(this._detRT, 0, 0, W, H, px);
+    R.luz.value.copy(luz0); R.noite.value = noite0; R.grade.value.copy(grade0); r.setRenderTarget(ant); r.setClearColor(cc, ca);
+    if (!this._janDet) { const d = new Uint8Array(128 * 4096 * 4); const tex = new THREE.DataTexture(d, 128, 4096, THREE.RGBAFormat, THREE.UnsignedByteType); tex.minFilter = tex.magFilter = THREE.NearestFilter; this._janDet = { d, tex, n: 0 }; }
+    const D = this._janDet.d, ML = this._planosParaL(), cam = this.cam, v = new THREE.Vector3();
+    cam.updateMatrixWorld(true);
+    const lum = (u, h, f) => { v.copy(f(u, h)).applyMatrix4(ML).project(cam); if (v.z > 1 || Math.abs(v.x) > 1 || Math.abs(v.y) > 1) return -1;
+      const x = Math.min(W - 1, Math.max(0, Math.round((v.x * 0.5 + 0.5) * (W - 1)))), y = Math.min(H - 1, Math.max(0, Math.round((v.y * 0.5 + 0.5) * (H - 1)))), k = (y * W + x) * 4;
+      if (px[k + 3] < 200) return -1; return (0.2126 * px[k] + 0.7152 * px[k + 1] + 0.0722 * px[k + 2]) / 255; };
+    let novos = 0;
+    S.forEach((p, i) => {
+      const c = Math.cos(p.a), s = Math.sin(p.a);
+      for (let face = 0; face < 4; face++) {
+        const fx = face < 2, sg = face % 2 === 0 ? 1 : -1, off = fx ? p.h[0] : p.h[1], ao = fx ? p.h[1] : p.h[0];
+        // wall point (u along the face, h height) -> B5; box frame: q.x along e1 = (c, s), q.y along e2 = (-s, c)
+        const f = (u, h) => { const qx = fx ? sg * off : u, qy = fx ? u : sg * off; return new THREE.Vector3(p.c[0] + qx * c - qy * s, h, p.c[1] + qx * s + qy * c); };
+        const nb = Math.max(1, Math.floor(2 * ao / 3.1)), bay = 2 * ao / nb, nf = Math.min(32, Math.floor((p.y[1] - p.y[0]) / 2.85));
+        for (let cx = 1; cx < Math.min(nb - 1, 128); cx++) for (let cy = 1; cy < nf; cy++) {
+          const row = (i * 4 + face) * 32 + cy, k0 = (row * 128 + cx) * 4; if (D[k0 + 3] > 0) continue;
+          const uS = -ao + cx * bay, hb = p.y[0] + cy * 2.85; if (hb + 2.85 > p.y[1] - 1) continue;
+          // search the WHOLE cell (12 x 8 samples): the LiDAR floor line and Google's floors drift by up to a metre, a fixed sampling
+          // row missed most openings. Opening = darkest compact spot, < 0.6 x the cell's bright wall, with wall 0.9 m left and right and
+          // 1.0 m above and below brighter than 1.5 x it.
+          const G = []; let lmax = 0, lmin = 9, gmin = -1, fora = false;
+          for (let a = 0; a < 8 && !fora; a++) for (let k = 0; k < 12; k++) { const x = lum(uS + bay * (k + 0.5) / 12, hb + 2.85 * (a + 0.5) / 8, f); if (x < 0) { fora = true; break; } G.push(x); if (x > lmax) lmax = x; if (x < lmin) { lmin = x; gmin = G.length - 1; } }
+          if (fora) continue; // not (fully) on screen in this view
+          const ord = [...G].sort((a2, b2) => a2 - b2), lpar = ord[Math.floor(ord.length * 0.75)], nesc = G.filter((x) => x < 0.6 * lpar).length;
+          const ka = gmin % 12, aa = Math.floor(gmin / 12);
+          let sw = 0, su = 0, sh = 0; G.forEach((x, n) => { const k = n % 12, a = Math.floor(n / 12); if (Math.abs(k - ka) <= 2 && Math.abs(a - aa) <= 2) { const w = Math.max(0, 0.6 * lpar - x); sw += w; su += w * (k + 0.5) / 12; sh += w * (a + 0.5) / 8; } });
+          const ucr = sw > 0 ? su / sw : (ka + 0.5) / 12, uc = uS + ucr * bay, hc = hb + 2.85 * (sw > 0 ? sh / sw : (aa + 0.5) / 8);
+          const lC = lum(uc, hc, f), lE = lum(uc - 0.9, hc, f), lD = lum(uc + 0.9, hc, f), lAc = lum(uc, hc + 1.0, f), lAb = lum(uc, hc - 1.0, f);
+          const ok = lpar > 0.04 && lC >= 0 && lC < 0.6 * lpar && nesc <= 30 && Math.min(lE, lD) > 1.5 * lC && Math.min(lAc, lAb) > 1.5 * lC && hc > hb + 0.6 && hc < hb + 2.4;
+          let wl = 0, wr = 0, ht = 0, hd = 0; const lim = 0.72 * lpar;
+          if (ok) { for (let d = 0.1; d <= 1.2; d += 0.1) { const x = lum(uc - d, hc, f); if (x < 0 || x > lim) break; wl = d; } for (let d = 0.1; d <= 1.2; d += 0.1) { const x = lum(uc + d, hc, f); if (x < 0 || x > lim) break; wr = d; }
+            for (let d = 0.1; d <= 1.2; d += 0.1) { const x = lum((uc - wl + uc + wr) / 2, hc + d, f); if (x < 0 || x > lim) break; ht = d; } for (let d = 0.1; d <= 1.2; d += 0.1) { const x = lum((uc - wl + uc + wr) / 2, hc - d, f); if (x < 0 || x > lim) break; hd = d; } }
+          const ucm = (uc - wl + uc + wr) / 2, hcm = (hc + ht + hc - hd) / 2, larg = wl + wr + 0.1, alt = ht + hd + 0.1;
+          if (ok) { const st = window.__g3dJanMed || (window.__g3dJanMed = []); if (st.length < 2000) st.push([+larg.toFixed(1), +alt.toFixed(1)]); }
+          D[k0] = ok ? Math.max(1, Math.round(larg / 3 * 255)) : 0; D[k0 + 1] = Math.round(Math.min(1, Math.max(0, (ucm - uS) / bay)) * 255); D[k0 + 2] = Math.round(Math.min(1, (hcm - hb) / 2.85) * 255); D[k0 + 3] = ok ? Math.max(2, Math.round(alt / 3 * 255)) : 1; novos++;
+        }
+      }
+    });
+    this._janDet.n += novos; this._janDet.tex.needsUpdate = true;
+    R.janDet.value = this._janDet.tex; R.janDetOk.value = 1;
+    if (typeof window !== 'undefined') window.__g3dJanDet = { celulas: this._janDet.n, achadas: [...D].filter((x, k) => k % 4 === 0 && x > 0).length };
+    this.acordar();
   }
   vidroNaTela(camera) { return this.dirsV ? this.janelaNaTela(camera, this.dirsV) : { x0: -1, y0: -1, x1: 1, y1: 1 }; }
   // NDC box of the open window as seen by `camera` (scene frame), with a small margin; null = no window on screen
@@ -657,7 +738,8 @@ export class VistaGoogle {
     r.setRenderTarget(rtAnt); r.setClearColor(cc, ca);
     if (assa) this._planosDepois();
     const st = this.s.tiles.stats; STATUS.tiles = st ? (st.visible || 0) : 0;
-    if (st && (st.queued + st.downloading + st.parsing > 0 || this.s.tiles.loadProgress < 1)) this.acordar();
+    if (st && (st.queued + st.downloading + st.parsing > 0 || this.s.tiles.loadProgress < 1)) { this.acordar(); this._detQ = 0; }
+    else if (this._janSel && this._janSel.length) { this._detQ = (this._detQ || 0) + 1; if (this._detQ === 20) this._janDetecta(); }
     this.atualizaCredito();
   }
   // ---- photo mode (08/10): which of the 6 axis directions (90 deg faces) see the open window, in the local frame
