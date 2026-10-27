@@ -156,7 +156,53 @@ const LUZ_GLSL = `
           altoJ = topoJ > 12.0 && vB5.y < topoJ - 1.5;
         }
       }
-      if (!verde && altoJ && abs(nB.y) < 0.3 && hLocJ > 9.0 && vB5.y > 3.5) { // 9 m (3rd floor up): the walls/parapets of the 1-2 storey houses below (prints) got shards
+      // JANELAS-PLANOS 26/10 (Victor rejected the 150 m cut: 'janelas acesas de verdade' on the near towers too, no dark towers, no
+      // shards). Root cause of the shards: the window cell was decided per pixel on whatever Google triangle it landed on. Now, in the
+      // 360 window view, a fragment of a building of OUR LiDAR footprint list (vizinhos-planos.json, GeoSampa LiDAR rectangles: the
+      // same data as the shadow city; uJanB = up to 16 boxes near the eye) takes its window from the building's TRUE WALL PLANE: the
+      // camera ray through the fragment is intersected with the nearest face of the box and the window grid (floors of 2.85 m from the
+      // box base, bays of ~3.1 m fitted to the face width) is evaluated at that point of the plane. The lit window is therefore the
+      // perspective image of a rectangle on the wall, whatever Google's triangulation under it; Google's surface only says WHERE the
+      // building is on screen (other buildings in front are other fragments, so occlusion is Google's own). Only fragments within 3 m
+      // of the wall the camera ray enters the box by (slab test; a roof entry or an up-facing fragment = no window), ground floor and the
+      // last 1.5 m under the roof skipped. The same rectangle is thus hit by every pixel of the window, whichever triangle they are on.
+      float janT = -1.0; vec2 celT = vec2(0.0);
+      if (uJanN > 0.5 && uPertoJ < 0.5) {
+        vec3 camN = (uParaB5 * vec4(cameraPosition, 1.0)).xyz;
+        for (int i = 0; i < 32; i++) {
+          if (float(i) >= uJanN) break;
+          vec4 a = uJanB[2 * i], b = uJanB[2 * i + 1];
+          vec2 e1 = b.xy, e2 = vec2(-b.y, b.x), dq = vB5.xz - a.xy, q = vec2(dot(dq, e1), dot(dq, e2));
+          if (abs(q.x) > a.z + 4.0 || abs(q.y) > a.w + 4.0 || vB5.y < b.z - 1.0 || vB5.y > b.w + 2.0) continue;
+          janT = 0.0; // a footprint building: its windows come only from its wall planes
+          if (b.w - b.z < 12.0) break; // low block (1-3 storeys, often under trees): no lit window (cells there were cut into flecks)
+          // camera ray to this fragment (t = 1 at the fragment), box slabs in the box frame: entry point = the wall the eye sees here
+          vec2 dc = camN.xz - a.xy, qc = vec2(dot(dc, e1), dot(dc, e2));
+          vec3 o = vec3(qc.x, camN.y, qc.y), D = vec3(q.x - qc.x, vB5.y - camN.y, q.y - qc.y);
+          vec3 iD = 1.0 / (D + sign(D) * 1e-5 + step(abs(D), vec3(0.0)) * 1e-5);
+          vec3 t1 = (vec3(-a.z, b.z, -a.w) - o) * iD, t2 = (vec3(a.z, b.w, a.w) - o) * iD;
+          vec3 tn = min(t1, t2), tf = max(t1, t2);
+          float tE = max(max(tn.x, tn.y), tn.z), tS = min(min(tf.x, tf.y), tf.z);
+          if (tE > tS || tE <= 0.0 || tn.y >= max(tn.x, tn.z) || abs(nB.y) > 0.6) break; // missed the box, entered by the roof, or an up-facing fragment
+          bool fx = tn.x >= tn.z;
+          if ((fx ? abs(abs(q.x) - a.z) : abs(abs(q.y) - a.w)) > 3.0) break; // the fragment is not on that wall (lower houses inside a block rectangle made flecks)
+          vec3 P = o + tE * D;
+          float ao = fx ? a.w : a.z, u = fx ? P.z : P.x;
+          float nb = max(1.0, floor(2.0 * ao / 3.1)), bay = 2.0 * ao / nb;
+          vec2 cc = vec2((u + ao) / bay, (P.y - b.z) / 2.85), fr = fract(cc), cl = floor(cc);
+          float dentro = step(0.6, cl.x * bay) * step(0.6, 2.0 * ao - (cl.x + 1.0) * bay) * step(1.0, cl.y) * step(b.z + (cl.y + 1.0) * 2.85, b.w - 1.0); // whole cells only (a cell cut by the roof line or a corner made slivers)
+          janT = dentro * smoothstep(0.22, 0.26, fr.x) * (1.0 - smoothstep(0.74, 0.78, fr.x)) * smoothstep(0.34, 0.38, fr.y) * (1.0 - smoothstep(0.84, 0.88, fr.y));
+          celT = cl + vec2(float(i) * 37.0 + (fx ? 0.0 : 17.0) + ((fx ? P.x : P.z) > 0.0 ? 5.0 : 0.0), 0.0);
+          break;
+        }
+      }
+      if (janT >= 0.0) {${typeof location !== 'undefined' && /[?&]janpdbg=1/.test(location.search) ? ' outgoingLight = cB * 0.35 + vec3(0.0, janT, 0.6 * step(janT, 0.0));' : ''} // ?janpdbg=1 (tests): blue = footprint building, green = window cell
+        float acesaT = step(g3dH21(celT), uFracG) * janT;
+        float vidroT = 1.0 - smoothstep(0.18, 0.5, dot(cB, vec3(0.2126, 0.7152, 0.0722)));
+        vec3 quenteT = mix(vec3(1.0, 0.72, 0.42), vec3(0.95, 0.9, 0.82), step(0.82, g3dH21(celT + 7.0)));
+        float forcaT = 0.12 + 0.88 * pow(g3dH21(celT + 3.0), 2.2);
+        outgoingLight += uNoiteG * acesaT * mix(0.75, 1.0, vidroT) * quenteT * forcaT * 0.85;
+      } else if (!verde && altoJ && abs(nB.y) < 0.3 && hLocJ > 9.0 && vB5.y > 3.5) { // 9 m (3rd floor up): the walls/parapets of the 1-2 storey houses below (prints) got shards
         // window grid along the facade. 08/10 (Victor: 'triangulos, varios formatos'): Google's mesh is a patchwork of
         // triangles with their own normals, so a grid following each triangle's normal broke every window into shards. The
         // facade direction now comes from OUR city's walls (fachadas-angulo.webp, angle mod 90 deg): every triangle of a
@@ -353,7 +399,7 @@ export function iniciarGoogle() {
       s.tomar = (quem, pai, matriz, cam, erro) => {
         if (s.dono !== quem) {
           if (s.dono && s.dono.restauraCache) s.dono.restauraCache(); // the 360 photo freed the tiles: the next view gets its budget back
-          s._recFeito = false; if (s.recorte) { s.recorte.vizN.value = 0; s.recorte.perto.value = 0; s.recorte.mapaR.value.w = 0; s.recorte.ret.value.set(1, 1, 0, 0); } // building ghosts only in the outside view (cena3d turns them on)
+          s._recFeito = false; if (s.recorte) { s.recorte.vizN.value = 0; s.recorte.perto.value = 0; s.recorte.janN.value = 0; s.recorte.mapaR.value.w = 0; s.recorte.ret.value.set(1, 1, 0, 0); } // building ghosts only in the outside view (cena3d turns them on)
           for (const c of [...tiles.cameras]) tiles.deleteCamera(c);
           tiles.setCamera(cam);
           const g = tiles.group; if (g.parent !== pai) { g.parent?.remove(g); pai.add(g); }
@@ -363,6 +409,7 @@ export function iniciarGoogle() {
         if (!g.matrix.equals(matriz)) { g.matrix.copy(matriz); g.matrixWorldNeedsUpdate = true; if (s.atualizaRecorte) s.atualizaRecorte(); }
         else if (s.dono === quem && s.recorte && s.recorte.ecefParaB5 && !s._recFeito) { s._recFeito = true; s.atualizaRecorte(); }
         tiles.errorTarget = erro * C8.erroK;
+        if (quem && quem._janPlanos) quem._janPlanos(); // JANELAS-PLANOS: wall planes of the near footprint buildings (360 view)
       };
       // Memory (07/10, Victor's Android crashed "Ah, nao!"): tiles keep a CPU copy besides the GPU one. Dropping it was
       // tried and REVERTED: the outside view and the 360 draw the same tiles with two different WebGL contexts, and the second
@@ -373,18 +420,18 @@ export function iniciarGoogle() {
       // fragments inside the rectangle and nearer than the tower are dropped (x0 > x1 = off, e.g. in the 360)
       s.recorte = { liga: { value: 0 }, min: { value: new THREE.Vector3() }, max: { value: new THREE.Vector3() }, paraB5: { value: new THREE.Matrix4() }, ecefParaB5: null,
         ret: { value: new THREE.Vector4(1, 1, 0, 0) }, prof: { value: 0 },
-        luz: { value: new THREE.Vector3(1, 1, 1) }, noite: { value: 0 }, frac: { value: 0.25 }, perto: { value: 0 }, grade: { value: new THREE.Vector4(1, 1, 1, 0.18) }, nit: { value: C8.nitidez }, viz: { value: Array.from({ length: 16 }, () => new THREE.Vector4()) }, vizN: { value: 0 },
+        luz: { value: new THREE.Vector3(1, 1, 1) }, noite: { value: 0 }, frac: { value: 0.25 }, perto: { value: 0 }, janB: { value: Array.from({ length: 64 }, () => new THREE.Vector4()) }, janN: { value: 0 }, grade: { value: new THREE.Vector4(1, 1, 1, 0.18) }, nit: { value: C8.nitidez }, viz: { value: Array.from({ length: 16 }, () => new THREE.Vector4()) }, vizN: { value: 0 },
         mapa: { value: null }, mapaR: { value: new THREE.Vector4(0, 0, 0, 0) }, camB5: { value: new THREE.Vector3() }, alvoB5: { value: new THREE.Vector3() },
         terr: { value: null }, terrExt: { value: 0 }, ang: { value: null }, angExt: { value: 0 }, lote: { value: Array.from({ length: 24 }, () => new THREE.Vector2()) }, loteN: { value: 0 } };
       const shaderRecorte = (sh) => {
         sh.uniforms.uLote = s.recorte.lote; sh.uniforms.uLoteN = s.recorte.loteN; sh.uniforms.uRecLiga = s.recorte.liga; sh.uniforms.uRecMin = s.recorte.min; sh.uniforms.uRecMax = s.recorte.max; sh.uniforms.uParaB5 = s.recorte.paraB5;
         sh.uniforms.uRet = s.recorte.ret; sh.uniforms.uProf = s.recorte.prof;
-        sh.uniforms.uLuz = s.recorte.luz; sh.uniforms.uNoiteG = s.recorte.noite; sh.uniforms.uFracG = s.recorte.frac; sh.uniforms.uPertoJ = s.recorte.perto; sh.uniforms.uGrade = s.recorte.grade; sh.uniforms.uNitG = s.recorte.nit; sh.uniforms.uViz = s.recorte.viz; sh.uniforms.uVizN = s.recorte.vizN;
+        sh.uniforms.uLuz = s.recorte.luz; sh.uniforms.uNoiteG = s.recorte.noite; sh.uniforms.uFracG = s.recorte.frac; sh.uniforms.uPertoJ = s.recorte.perto; sh.uniforms.uJanB = s.recorte.janB; sh.uniforms.uJanN = s.recorte.janN; sh.uniforms.uGrade = s.recorte.grade; sh.uniforms.uNitG = s.recorte.nit; sh.uniforms.uViz = s.recorte.viz; sh.uniforms.uVizN = s.recorte.vizN;
         sh.uniforms.uMapaP = s.recorte.mapa; sh.uniforms.uMapaR = s.recorte.mapaR; sh.uniforms.uCamB5 = s.recorte.camB5; sh.uniforms.uAlvoB5 = s.recorte.alvoB5;
         sh.uniforms.uTerr = s.recorte.terr; sh.uniforms.uTerrExt = s.recorte.terrExt; sh.uniforms.uAng = s.recorte.ang; sh.uniforms.uAngExt = s.recorte.angExt;
         sh.vertexShader = 'uniform mat4 uParaB5;\nvarying vec3 vB5;\nvarying float vProf;\n' + sh.vertexShader.replace('#include <project_vertex>', '#include <project_vertex>\nvB5 = (uParaB5 * modelMatrix * vec4(transformed, 1.0)).xyz;\nvProf = -mvPosition.z;');
         sh.fragmentShader = 'uniform mat4 uParaB5;\nuniform vec2 uLote[24];\nuniform float uLoteN;\nbool g3dNoLote(vec2 p) { bool d = false; for (int i = 0; i < 24; i++) { if (float(i) >= uLoteN) break; vec2 a = uLote[i], b = uLote[i + 1 < 24 ? i + 1 : 0]; if (float(i + 1) >= uLoteN) b = uLote[0]; if ((a.y > p.y) != (b.y > p.y) && p.x < (b.x - a.x) * (p.y - a.y) / (b.y - a.y) + a.x) d = !d; } return d; }\nuniform float uRecLiga;\nuniform vec3 uRecMin;\nuniform vec3 uRecMax;\nuniform vec4 uRet;\nuniform float uProf;\nvarying vec3 vB5;\nvarying float vProf;\n'
-          + 'uniform vec4 uGrade;\nuniform float uNitG;\nuniform vec4 uViz[16];\nuniform float uVizN;\nbool g3dNoViz(vec3 p) { for (int i = 0; i < 8; i++) { if (float(i) >= uVizN) break; vec4 a = uViz[2 * i], b = uViz[2 * i + 1]; vec2 d = p.xz - a.xy; vec2 q = vec2(dot(d, b.xy), dot(d, vec2(-b.y, b.x))); if (abs(q.x) < a.z && abs(q.y) < a.w && p.y > b.z && p.y < b.w) return true; } return false; }\n' + GRADE_GLSL + 'uniform vec3 uLuz;\nuniform float uNoiteG;\nuniform float uFracG;\nuniform float uPertoJ;\nuniform sampler2D uAng;\nuniform float uAngExt;\nfloat g3dH21(vec2 p) { p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }\n'
+          + 'uniform vec4 uGrade;\nuniform float uNitG;\nuniform vec4 uViz[16];\nuniform float uVizN;\nbool g3dNoViz(vec3 p) { for (int i = 0; i < 8; i++) { if (float(i) >= uVizN) break; vec4 a = uViz[2 * i], b = uViz[2 * i + 1]; vec2 d = p.xz - a.xy; vec2 q = vec2(dot(d, b.xy), dot(d, vec2(-b.y, b.x))); if (abs(q.x) < a.z && abs(q.y) < a.w && p.y > b.z && p.y < b.w) return true; } return false; }\n' + GRADE_GLSL + 'uniform vec3 uLuz;\nuniform float uNoiteG;\nuniform float uFracG;\nuniform float uPertoJ;\nuniform vec4 uJanB[64];\nuniform float uJanN;\nuniform sampler2D uAng;\nuniform float uAngExt;\nfloat g3dH21(vec2 p) { p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }\n'
           + FANT_GLSL
           + sh.fragmentShader.replace('#include <map_fragment>', NIT_GLSL).replace('#include <opaque_fragment>', LUZ_GLSL + '\n#include <opaque_fragment>').replace('void main() {',
           'void main() {\n  if (uRecLiga > 0.5 && all(greaterThan(vB5, uRecMin)) && all(lessThan(vB5, uRecMax))) discard;\n  if (uRecLiga > 0.5 && uLoteN > 2.5 && vB5.y > uRecMin.y && vB5.y < uRecMax.y && g3dNoLote(vB5.xz)) discard;\n  if (g3dFantasma(vB5)) discard;\n#ifndef G3D_PLANO\n  if (uVizN > 0.5 && g3dNoViz(vB5)) discard;\n#endif');
@@ -510,6 +557,28 @@ export class VistaGoogle {
       out.push(Math.cos(phi) * Math.sin(th), Math.cos(th), Math.sin(phi) * Math.sin(th));
     }
     this.dirsV = new Float32Array(out);
+  }
+  // JANELAS-PLANOS: the near LiDAR boxes (vizinhos-planos.json) around this eye -> uJanB (32 nearest, < 260 m, height >= 6 m,
+  // rectangle fill >= 0.7; up to 32 boxes). Recomputed when the eye moves (another point / unit). ?janplanos=0 = off (the old per-triangle rule).
+  _janPlanos() {
+    const R = this.s.recorte;
+    if (!R.janB || !R.ecefParaB5 || !this.matriz || (typeof location !== 'undefined' && /[?&]janplanos=0/.test(location.search))) { if (R.janN) R.janN.value = 0; return; }
+    const chave = this.matriz.elements.map((x) => x.toFixed(2)).join(',');
+    if (this._janChave === chave) { R.janN.value = this._janN || 0; return; }
+    this._janChave = chave; this._janN = 0; R.janN.value = 0;
+    if (!PLANOS_DADOS) PLANOS_DADOS = fetch('assets/entorno/vizinhos-planos.json').then((r) => (r.ok ? r.json() : null)).catch(() => null);
+    PLANOS_DADOS.then((D) => {
+      if (this._janChave !== chave || !D || !D.partes) return;
+      const paraB5 = new THREE.Matrix4().copy(R.ecefParaB5).multiply(this.matriz.clone().invert());
+      const olho = new THREE.Vector3(0, 0, 0).applyMatrix4(paraB5);
+      const dist = (p) => { const c = Math.cos(p.a), s = Math.sin(p.a), dx = olho.x - p.c[0], dz = olho.z - p.c[1];
+        const qx = dx * c + dz * s, qz = -dx * s + dz * c; return Math.hypot(Math.max(Math.abs(qx) - p.h[0], 0), Math.max(Math.abs(qz) - p.h[1], 0)); };
+      const sel = D.partes.filter((p) => p.fill >= 0.7 && p.y[1] - p.y[0] >= 6).map((p) => ({ p, d: dist(p) })).filter((x) => x.d < 260 && x.d > 2).sort((a, b) => a.d - b.d).slice(0, 32);
+      sel.forEach(({ p }, i) => { R.janB.value[2 * i].set(p.c[0], p.c[1], p.h[0], p.h[1]); R.janB.value[2 * i + 1].set(Math.cos(p.a), Math.sin(p.a), p.y[0], p.y[1]); });
+      this._janN = sel.length; if (this.s.dono === this) R.janN.value = sel.length;
+      if (typeof window !== 'undefined') window.__g3dJanPlanos = { olho: olho.toArray().map((x) => +x.toFixed(1)), n: sel.length, ids: sel.map((x) => x.p.id + ':' + x.d.toFixed(0)) };
+      this.acordar();
+    });
   }
   vidroNaTela(camera) { return this.dirsV ? this.janelaNaTela(camera, this.dirsV) : { x0: -1, y0: -1, x1: 1, y1: 1 }; }
   // NDC box of the open window as seen by `camera` (scene frame), with a small margin; null = no window on screen
