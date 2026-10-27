@@ -167,7 +167,7 @@ const LUZ_GLSL = `
       // of the wall the camera ray enters the box by (slab test; a roof entry or an up-facing fragment = no window), ground floor and the
       // last 1.5 m under the roof skipped. The same rectangle is thus hit by every pixel of the window, whichever triangle they are on.
       float janT = -1.0; vec2 celT = vec2(0.0);
-      float uT = 0.0, hT = 0.0, uST = 0.0, bayT = 3.1, hbT = 0.0; vec2 clT = vec2(0.0); float boxT = 0.0, faceT = 0.0; // JANELAS-COMBINADAS
+      float uT = 0.0, hT = 0.0, uST = 0.0, bayT = 3.1, hbT = 0.0; vec2 clT = vec2(0.0); float boxT = 0.0, faceT = 0.0; vec2 nFJ = vec2(1.0, 0.0); // JANELAS-COMBINADAS
       if (uJanN > 0.5 && uPertoJ < 0.5) {
         vec3 camN = (uParaB5 * vec4(cameraPosition, 1.0)).xyz;
         for (int i = 0; i < 32; i++) {
@@ -194,7 +194,7 @@ const LUZ_GLSL = `
           vec2 cc = vec2((u + ao) / bay, (P.y - b.z) / 2.85), fr = fract(cc), cl = floor(cc);
           float dentro = step(0.6, cl.x * bay) * step(0.6, 2.0 * ao - (cl.x + 1.0) * bay) * step(1.0, cl.y) * step(b.z + (cl.y + 1.0) * 2.85, b.w - 1.0); // whole cells only (a cell cut by the roof line or a corner made slivers)
           janT = dentro; uT = u; hT = P.y; uST = -ao + cl.x * bay; bayT = bay; hbT = b.z + cl.y * 2.85; clT = cl; boxT = float(i);
-          faceT = fx ? (P.x > 0.0 ? 0.0 : 1.0) : (P.z > 0.0 ? 2.0 : 3.0);
+          faceT = fx ? (P.x > 0.0 ? 0.0 : 1.0) : (P.z > 0.0 ? 2.0 : 3.0); nFJ = fx ? e1 : e2;
           celT = cl + vec2(float(i) * 37.0 + (fx ? 0.0 : 17.0) + ((fx ? P.x : P.z) > 0.0 ? 5.0 : 0.0), 0.0);
           break;
         }
@@ -207,22 +207,44 @@ const LUZ_GLSL = `
       // clear dark opening, a wide dark band, no wall above / below) draw nothing.
       float fwU = 1.5 * fwidth(uT), fwH = 1.5 * fwidth(hT);
       if (janT >= 0.0) {
-        float aJ = 0.0, dbgJ = 0.0;
-        if (janT > 0.5 && uJanDetOk > 0.5 && clT.x < 128.0 && clT.y < 32.0) {
-          vec4 dt = texelFetch(uJanDet, ivec2(int(clT.x), int((boxT * 4.0 + faceT) * 32.0 + clT.y)), 0);
-          dbgJ = dt.a > 0.0 ? (dt.r > 0.0 ? 1.0 : 0.5) : 0.0;
-          if (dt.r > 0.0) {
-            float hwJ = ${typeof location !== 'undefined' && /[?&]janmed=1/.test(location.search) ? 'clamp(dt.r * 1.5, 0.3, 0.75)' : '0.6'}, hhJ = ${typeof location !== 'undefined' && /[?&]janmed=1/.test(location.search) ? 'clamp(dt.a * 1.5, 0.35, 0.75)' : '0.65'}; // half width / height: standard 1.2 x 1.3 m, or the measured opening (?janmed=1)
-            float uc = uST + dt.g * bayT, y = hT - (hbT + dt.b * 2.85) + hhJ;
-            float x = uT - uc;
-            aJ = smoothstep(-hwJ - fwU, -hwJ + fwU, x) * (1.0 - smoothstep(hwJ - fwU, hwJ + fwU, x)) * smoothstep(-fwH, fwH, y) * (1.0 - smoothstep(2.0 * hhJ - fwH, 2.0 * hhJ + fwH, y));
-          }
+        // JANELAS-BURACO 27/10 (Meta: our own rectangles read as pasted cards). An ON cell (floor x bay of the LiDAR wall, hashed at the
+        // far city's density) makes GOOGLE'S OWN window hole glow: mask = local darkness of the facade photo relative to its blurred
+        // local mean (mip level + 3.5 = ~11 texels), soft threshold, the texel slightly blurred (+0.7 level = ~1 texel dilation). The
+        // lit shape is the photo's hole, as blurred as the building; a wide dark band (balcony gap) is dark in the mean too, so it does
+        // not glow. Faint halo (+2 levels, 18 %) so it reads as light. Cells with no hole stay as Google draws them.
+        float mJ = 0.0, hJ = 0.0;
+#ifdef USE_MAP
+        if (janT > 0.5) {
+          vec3 LMJ = vec3(0.2126, 0.7152, 0.0722);
+          vec2 tsJ = vec2(textureSize(map, 0)), dxJ = dFdx(vMapUv) * tsJ, dyJ = dFdy(vMapUv) * tsJ;
+          float lodJ = max(0.0, 0.5 * log2(max(max(dot(dxJ, dxJ), dot(dyJ, dyJ)), 1e-6)));
+          float lmJ = max(dot(textureLod(map, vMapUv, lodJ + 3.5).rgb, LMJ), 1e-3);
+          float l1J = dot(textureLod(map, vMapUv, lodJ + 0.7).rgb, LMJ), l2J = dot(textureLod(map, vMapUv, lodJ + 2.0).rgb, LMJ);
+          float l5J = max(dot(textureLod(map, vMapUv, lodJ + 5.5).rgb, LMJ), 1e-3);
+          mJ = (1.0 - smoothstep(0.5, 0.75, l1J / lmJ)) * smoothstep(0.7, 0.9, lmJ / l5J); // a large dark area (balcony gap, big opening) is dark in the wider mean too: no glow
+          // only the flat facade parallel to the wall (zig-zag balconies make their own dark gaps) and away from the cell borders (a hole
+          // split by the LiDAR floor/bay line would be cut straight): soft fade over the outer 15-30 % of the cell
+          // a hole has wall on all four sides (1.3 m left/right, 1.2 m up/down along the WALL axes: a balcony recess is wider than a window, texture steps from the screen
+          // derivatives): balcony gaps (dark above and below) and slab shadows (dark left and right) do not glow
+          vec2 dUsJ = vec2(dFdx(uT), dFdy(uT)), dHsJ = vec2(dFdx(hT), dFdy(hT)); float detJ = dUsJ.x * dHsJ.y - dUsJ.y * dHsJ.x;
+          if (abs(detJ) > 1e-9) {
+            vec2 duvx = dFdx(vMapUv), duvy = dFdy(vMapUv);
+            vec2 Uu = (duvx * dHsJ.y - duvy * dHsJ.x) / detJ, Uh = (duvy * dUsJ.x - duvx * dUsJ.y) / detJ;
+            float lE = dot(textureLod(map, vMapUv - Uu * 1.3, lodJ + 0.7).rgb, LMJ), lD = dot(textureLod(map, vMapUv + Uu * 1.3, lodJ + 0.7).rgb, LMJ);
+            float lC = dot(textureLod(map, vMapUv + Uh * 1.2, lodJ + 0.7).rgb, LMJ), lB = dot(textureLod(map, vMapUv - Uh * 1.2, lodJ + 0.7).rgb, LMJ);
+            mJ *= smoothstep(1.2, 1.6, min(lE, lD) / max(l1J, 1e-3)) * smoothstep(1.2, 1.6, min(lC, lB) / max(l1J, 1e-3));
+          } else mJ = 0.0;
+          vec2 frJ = fract(vec2((uT - uST) / bayT, (hT - hbT) / 2.85));
+          float bordaJ = smoothstep(0.02, 0.3, min(frJ.x, 1.0 - frJ.x)) * smoothstep(0.02, 0.3, min(frJ.y, 1.0 - frJ.y)); // wide and soft: a hole split by the line dims, it is not cut
+          mJ *= bordaJ * smoothstep(0.88, 0.96, abs(dot(normalize(nB.xz + 1e-6), nFJ))) * (1.0 - smoothstep(0.04, 0.1, length(fwidth(nB)))); // + not on small balcony faces
+          hJ = (1.0 - smoothstep(0.6, 0.9, l2J / lmJ)) * smoothstep(0.7, 0.9, lmJ / l5J) * bordaJ * (1.0 - smoothstep(0.04, 0.1, length(fwidth(nB))));
         }
-        ${typeof location !== 'undefined' && /[?&]janpdbg=1/.test(location.search) ? ' outgoingLight = cB * 0.35 + vec3(aJ, 0.4 * dbgJ, 0.6 * step(janT, 0.0));' : ''} // ?janpdbg=1: blue = footprint building, dim green = cell tested, bright green = opening found, red = window
-        float acesaT = step(g3dH21(celT), min(1.0, uFracG * 1.8)) * aJ${typeof location !== 'undefined' && /[?&]janoff=1/.test(location.search) ? ' * 0.0' : ''};
+#endif
+        ${typeof location !== 'undefined' && /[?&]janpdbg=1/.test(location.search) ? ' outgoingLight = cB * 0.35 + vec3(mJ * janT, 0.4 * janT, 0.6 * step(janT, 0.0));' : ''} // ?janpdbg=1: blue = footprint building, green = cell, red = hole mask
+        float acesaT = step(g3dH21(celT), min(1.0, uFracG * 1.6)) * step(0.5, janT)${typeof location !== 'undefined' && /[?&]janoff=1/.test(location.search) ? ' * 0.0' : ''};
         float forcaT = 0.6 + 0.4 * g3dH21(celT + 3.0);
-        vec3 corJ = vec3(1.0, 0.72, 0.42) * forcaT * (0.8 + 0.4 * (1.0 - smoothstep(0.05, 0.4, dot(cB, vec3(0.2126, 0.7152, 0.0722)))));
-        outgoingLight = mix(outgoingLight, corJ * uNoiteG * 0.9, acesaT * min(1.0, uNoiteG * 1.5));
+        vec3 corJ = vec3(1.0, 0.72, 0.42) * forcaT;
+        outgoingLight += uNoiteG * acesaT * corJ * (0.85 * mJ + 0.18 * hJ);
       } else if (!verde && altoJ && abs(nB.y) < 0.3 && hLocJ > 9.0 && vB5.y > 3.5) { // 9 m (3rd floor up): the walls/parapets of the 1-2 storey houses below (prints) got shards
         // window grid along the facade. 08/10 (Victor: 'triangulos, varios formatos'): Google's mesh is a patchwork of
         // triangles with their own normals, so a grid following each triangle's normal broke every window into shards. The
@@ -739,7 +761,7 @@ export class VistaGoogle {
     if (assa) this._planosDepois();
     const st = this.s.tiles.stats; STATUS.tiles = st ? (st.visible || 0) : 0;
     if (st && (st.queued + st.downloading + st.parsing > 0 || this.s.tiles.loadProgress < 1)) { this.acordar(); this._detQ = 0; }
-    else if (this._janSel && this._janSel.length) { this._detQ = (this._detQ || 0) + 1; if (this._detQ === 20) this._janDetecta(); }
+    else if (this._janSel && this._janSel.length) { this._detQ = (this._detQ || 0) + 1; if (this._detQ === 20 && /[?&]janret=1/.test(location.search)) this._janDetecta(); /* rectangle detection (rejected 27/10) only with ?janret=1 */ }
     this.atualizaCredito();
   }
   // ---- photo mode (08/10): which of the 6 axis directions (90 deg faces) see the open window, in the local frame
