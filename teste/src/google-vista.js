@@ -66,7 +66,11 @@ const FOTO_MB = (+(typeof location !== 'undefined' && new URLSearchParams(locati
 const FOTO_N = +(typeof location !== 'undefined' && new URLSearchParams(location.search).get('gfn')) || (capacidade().nivel === 'topo' ? 4 : 2); // regions per face side (mid phones: 2x2 at the lower detail)
 // RODADA 26/10 item 1: coarse first pass over every window face (?gfr=0 = off, ?gferr2= its errorTarget)
 const RAPIDO = !(typeof location !== 'undefined' && new URLSearchParams(location.search).get('gfr') === '0');
-const ERRO_RAPIDO = +(typeof location !== 'undefined' && new URLSearchParams(location.search).get('gferr2')) || ERRO_FOTO * 3;
+// 25/11 (Meta, measured on the MORADIA and the site's Upper studio): the second, detailed pass of the window photo downloaded 2.0-2.35 GB
+// in 5-7 min at 100 Mbit/s for a picture next to identical to the quick pass alone (~100-260 MB). ONE pass now: top phones 18 px at 2048,
+// the others 14 at 1536 (their old final look). ?gferr2= overrides; ?gdet=1 brings the old second pass back (A/B only).
+const ERRO_RAPIDO = +(typeof location !== 'undefined' && new URLSearchParams(location.search).get('gferr2')) || (capacidade().nivel === 'topo' ? ERRO_FOTO * 3 : ERRO_FOTO);
+const SO_RAPIDA = !(typeof location !== 'undefined' && new URLSearchParams(location.search).get('gdet') === '1');
 // 26/10 ASK 8 (Sites, pub 7: the tour window took 30-40 s to fill, flat dark-blue haze for the first 15-21 s; the bar fell back to
 // ~2 % and vanished at 76 %): the LIVE window (computers) loads in 2 stages - a coarse pass first (errorTarget x FASE1_K, the photo
 // mode's coarse ratio), shown as soon as the window has no pending tile (whole opening covered at that level), then the finest
@@ -899,8 +903,8 @@ export class VistaGoogle {
       const st = t.stats, pend = st.queued + st.downloading + st.parsing, tempo = agora - F.tR0;
       F.semFilaR = pend === 0 ? (F.semFilaR || 0) + 1 : 0;
       F.quietosR = pend === 0 && (t.loadProgress === undefined || t.loadProgress >= 1 || F.semFilaR >= 30) ? (F.quietosR || 0) + 1 : 0;
-      F.prog = Math.min(0.99, (fr + 0.5) / F.faces.length) * 0.5;
-      if ((F.quietosR >= 3 && tempo > 150) || tempo > 15000) {
+      F.prog = Math.min(0.99, (fr + 0.5) / F.faces.length) * (SO_RAPIDA ? 1 : 0.5);
+      if ((F.quietosR >= 3 && tempo > 150) || tempo > (SO_RAPIDA ? 120000 : 15000)) {   // 25/11: no 15 s cut (a half-loaded face drew blocks in the horizon)
         const r = this.r, cc = r.getClearColor(new THREE.Color()), ca = r.getClearAlpha(), ant = r.getRenderTarget(), al = F.alvos[fr];
         const R = this.s.recorte, luz0 = R.luz.value.clone(), noite0 = R.noite.value, grade0 = R.grade.value.clone();
         r.setClearColor(0x000000, 0); this._semFantasma();
@@ -911,8 +915,13 @@ export class VistaGoogle {
         R.luz.value.copy(luz0); R.noite.value = noite0; R.grade.value.copy(grade0); r.setRenderTarget(ant); r.setClearColor(cc, ca);
         F.log.push({ f: F.faces[fr], rapido: true, ms: Math.round(tempo), vis: st.visible });
         F.nRapido++; F.tR0 = agora; F.quietosR = 0; F.semFilaR = 0; F.i = Math.max(F.nRapido, F.k); F.t0 = agora;
-        if (F.nRapido >= F.faces.length && !this.pronto) { this.pronto = true; this.tPronto = agora; }
+        if (F.nRapido >= (SO_RAPIDA ? 1 : F.faces.length) && !this.pronto) { this.pronto = true; this.tPronto = agora; }   // 25/11: the city shows with the first face
         this.atualizaCredito();
+        if (SO_RAPIDA && F.nRapido >= F.faces.length) {   // 25/11: done after the quick pass (ERRO_RAPIDO)
+          F.feito = true; STATUS.tiles = st.visible || 0;
+          if (capacidade().nivel === 'topo') this.restauraCache(); else this.soltaCache();
+          try { localStorage.removeItem(chaveLocal('tabela3d-foto-ativa')); } catch (e) { /* ignore */ }
+        }
       }
       this.acordar(); return;
     }
